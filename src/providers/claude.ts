@@ -4,7 +4,7 @@
  * the Claude Agent SDK so one native Claude session can survive many DSH turns.
  */
 
-import { CallId, EMPTY_RESPONSE_CODE, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
+import { CallId, EMPTY_RESPONSE_CODE, LlmAdapter, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
   LlmModelInfo,
@@ -17,7 +17,7 @@ import {
   createSdkMcpServer,
   query as claudeAgentQuery,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { EffortLevel, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -46,6 +46,7 @@ const CLAUDE_SCOPE = 'org:create_api_key user:profile user:inference user:sessio
 const CLAUDE_CALLBACK_PATH = '/callback'
 const CLAUDE_CONTEXT_WINDOW = 200_000
 const CLAUDE_DEFAULT_MAX_TOKENS = 32_000
+const CLAUDE_EFFORTS = new Set<EffortLevel>(['low', 'medium', 'high', 'xhigh', 'max'])
 /** Refresh when the access token has less than this much life left. */
 export const CLAUDE_PREEMPT_MS = 5 * 60_000
 
@@ -350,6 +351,10 @@ export class ClaudeAdapter extends LlmAdapter {
 
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     const configured = this.options.models.find(entry => entry.id === model)
+    const efforts = configured?.reasoningEfforts?.map(effort => ({
+      id: ReasoningEffortId(effort),
+      name: effort === 'xhigh' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1),
+    }))
     return Promise.resolve({
       provider,
       id: model,
@@ -357,8 +362,16 @@ export class ClaudeAdapter extends LlmAdapter {
       inputModalities: configured?.inputModalities ?? CLAUDE_MODALITIES,
       context: { contextWindow: configured?.contextWindow ?? CLAUDE_CONTEXT_WINDOW },
       defaultMaxTokens: configured?.maxTokens ?? CLAUDE_DEFAULT_MAX_TOKENS,
-      // No reasoning metadata: the subscription endpoint's thinking support is
-      // not exercised, so effort requests reject as unsupported.
+      ...efforts === undefined
+        ? {}
+        : {
+          reasoning: {
+            efforts,
+            ...configured?.defaultReasoningEffort === undefined
+              ? {}
+              : { defaultEffort: ReasoningEffortId(configured.defaultReasoningEffort) },
+          },
+        },
     })
   }
 
@@ -430,6 +443,7 @@ export class ClaudeAdapter extends LlmAdapter {
     const toolsSignature = signature(JSON.stringify(options.tools ?? []))
     const canResume = previous !== undefined
       && previous.model === options.model
+      && previous.reasoningEffort === options.reasoningEffort
       && previous.systemSignature === systemSignature
       && previous.toolsSignature === toolsSignature
       && previous.inputMessageCount <= ids.length
@@ -482,6 +496,7 @@ export class ClaudeAdapter extends LlmAdapter {
         inputMessageCount: ids.length,
         inputMessageSignature: signature(ids.join('\n')),
         model: options.model,
+        ...options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort },
         systemSignature,
         toolsSignature,
         stepsThisTurn,
@@ -495,6 +510,9 @@ export class ClaudeAdapter extends LlmAdapter {
         prompt: resume ? sdkUserMessages(sendableDelta) : sdkInitialPrompt(resolvedMessages),
         options: {
           model: options.model,
+          ...options.reasoningEffort === undefined
+            ? {}
+            : { effort: claudeEffort(options.reasoningEffort) },
           cwd: tmpdir(),
           maxTurns: this.options.cliMaxTurns,
           ...resume && claudeSessionId !== undefined ? { resume: claudeSessionId } : {},
@@ -623,10 +641,19 @@ interface ClaudeCliSessionState {
   inputMessageCount: number
   inputMessageSignature: string
   model: string
+  reasoningEffort?: string
   systemSignature: string
   toolsSignature: string
   stepsThisTurn: number
   lastUsedAt: number
+}
+
+/** Narrow one advertised opaque effort id to the Agent SDK vocabulary. */
+function claudeEffort(effort: string): EffortLevel {
+  if (!CLAUDE_EFFORTS.has(effort as EffortLevel)) {
+    throw new LlmError(`Claude Agent SDK does not support reasoning effort "${effort}"`, 'UNSUPPORTED_REASONING_EFFORT')
+  }
+  return effort as EffortLevel
 }
 
 /** Small FIFO semaphore; the default limit of one prevents parallel quota spikes. */
@@ -681,6 +708,7 @@ function isClaudeCliSessionState(value: unknown): value is ClaudeCliSessionState
     && state.inputMessageCount >= 0
     && typeof state.inputMessageSignature === 'string'
     && typeof state.model === 'string'
+    && (state.reasoningEffort === undefined || typeof state.reasoningEffort === 'string')
     && typeof state.systemSignature === 'string'
     && typeof state.toolsSignature === 'string'
     && typeof state.stepsThisTurn === 'number'

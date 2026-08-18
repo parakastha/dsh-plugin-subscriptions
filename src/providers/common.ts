@@ -27,6 +27,10 @@ export interface ModelEntry {
   maxTokens?: number
   /** Accepted request modalities; when set, wins over the provider default. */
   inputModalities?: ('text' | 'image')[]
+  /** Adapter-owned reasoning effort ids offered for this exact model. */
+  reasoningEfforts?: string[]
+  /** Effort selected when the caller does not choose one explicitly. */
+  defaultReasoningEffort?: string
 }
 
 /**
@@ -54,6 +58,18 @@ export function validateModels(models: readonly ModelEntry[], label: string): Mo
         || model.inputModalities.some(modality => modality !== 'text' && modality !== 'image'))) {
       throw new Error(`${label}: catalog model "${model.id}" inputModalities must be a non-empty list of "text"/"image"`)
     }
+    if (model.reasoningEfforts !== undefined
+      && (model.reasoningEfforts.length === 0
+        || model.reasoningEfforts.some(effort => effort.length === 0)
+        || new Set(model.reasoningEfforts).size !== model.reasoningEfforts.length)) {
+      throw new Error(`${label}: catalog model "${model.id}" reasoningEfforts must be a non-empty list of unique ids`)
+    }
+    if (model.defaultReasoningEffort !== undefined
+      && !model.reasoningEfforts?.includes(model.defaultReasoningEffort)) {
+      throw new Error(
+        `${label}: catalog model "${model.id}" defaultReasoningEffort must be included in reasoningEfforts`,
+      )
+    }
     if (seen.has(model.id)) throw new Error(`${label}: duplicate catalog model "${model.id}"`)
     seen.add(model.id)
     return {
@@ -62,6 +78,10 @@ export function validateModels(models: readonly ModelEntry[], label: string): Mo
       ...model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow },
       ...model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens },
       ...model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] },
+      ...model.reasoningEfforts === undefined ? {} : { reasoningEfforts: [...model.reasoningEfforts] },
+      ...model.defaultReasoningEffort === undefined
+        ? {}
+        : { defaultReasoningEffort: model.defaultReasoningEffort },
     }
   })
 }

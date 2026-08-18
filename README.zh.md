@@ -14,7 +14,7 @@
 
 ![模型选择器中的订阅模型](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-picker.png)
 
-声明了推理等级的模型会在同一菜单里多出**推理等级**选择 —— Codex 系列模型,以及 Grok 4.6 / 4.5(档位和默认值来自各 provider 的实时目录,不是硬编码列表):
+声明了推理等级的模型会在同一菜单里多出**推理等级**选择 —— Codex 和 Grok 使用实时目录,配置的 Claude 模型使用 Agent SDK 支持的档位:
 
 ![推理等级选择器](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-effort.png)
 
@@ -27,7 +27,7 @@
 | 路由     | 订阅             | 模型 |
 |----------|------------------|------|
 | `codex`  | ChatGPT Plus/Pro | 从 `chatgpt.com/backend-api/codex/models` 实时获取 |
-| `claude` | Claude Pro/Max   | claude-opus-4-5、claude-sonnet-4-5、claude-haiku-4-5 |
+| `claude` | Claude Pro/Max   | claude-opus-5、claude-sonnet-5、claude-haiku-4-5 |
 | `grok`   | X Premium (xAI)  | 从 `api.x.ai/v1/models` 实时获取(仅对话模型);推理等级来自 Grok CLI 目录(`cli-chat-proxy.grok.com/v1/models`) |
 
 只有已登录的 provider 才会出现在会话模型选择器里;登录/退出后列表自动刷新。支持视觉的模型会声明 `['text', 'image']` 输入模态,图片内容会被翻译成各 provider 的 wire 格式。
@@ -108,6 +108,8 @@ GitHub 安装的:重新执行一遍 `add github:V1ki/dsh-plugin-subscriptions` �
     models:                            # 覆盖实时发现/内置目录
       codex:
         - { id: gpt-5.6-sol, name: GPT-5.6 Sol, contextWindow: 272000, inputModalities: [text, image] }
+      claude:
+        - { id: claude-opus-5, name: Claude Opus 5, contextWindow: 1000000, inputModalities: [text, image], reasoningEfforts: [low, medium, high, xhigh, max], defaultReasoningEffort: high }
 ```
 
 ## 开发

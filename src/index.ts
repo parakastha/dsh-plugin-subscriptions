@@ -115,6 +115,8 @@ const modelEntrySchema: z<ModelEntry> = z.object({
   contextWindow: z.number().step(1).min(1),
   maxTokens: z.number().step(1).min(1),
   inputModalities: z.array(z.union(['text', 'image'])),
+  reasoningEfforts: z.array(z.string()),
+  defaultReasoningEffort: z.string(),
 })
 
 export const Config: z<Config> = z.object({
@@ -145,9 +147,18 @@ const DEFAULT_MODELS: Record<ProviderId, ModelEntry[]> = {
     { id: 'gpt-5.1', name: 'GPT-5.1' },
   ],
   claude: [
-    { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', maxTokens: 64_000 },
-    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+    {
+      id: 'claude-opus-5', name: 'Claude Opus 5', maxTokens: 16_000,
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'high',
+    },
+    {
+      id: 'claude-sonnet-5', name: 'Claude Sonnet 5', maxTokens: 16_000,
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'high',
+    },
+    {
+      id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', maxTokens: 8_000,
+      reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'high',
+    },
   ],
   grok: [
     { id: 'grok-4', name: 'Grok 4' },

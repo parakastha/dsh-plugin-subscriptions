@@ -11,7 +11,7 @@
 - id: llm-subscriptions
   name: dsh-plugin-subscriptions
   config:
-    providers: [claude]
+    providers: [codex, claude]
     claude:
       maxConcurrentRequests: 1
       maxStepsPerTurn: 8
@@ -20,6 +20,26 @@
       usageCacheTtlMs: 5000
       sessionStateTtlMs: 21600000
       cliMaxTurns: 1
+    models:
+      claude:
+        - id: claude-opus-5
+          name: Claude Opus 5 (Latest)
+          maxTokens: 16000
+          inputModalities: [text, image]
+          reasoningEfforts: [low, medium, high, xhigh, max]
+          defaultReasoningEffort: high
+        - id: claude-sonnet-5
+          name: Claude Sonnet 5 (Latest)
+          maxTokens: 16000
+          inputModalities: [text, image]
+          reasoningEfforts: [low, medium, high, xhigh, max]
+          defaultReasoningEffort: high
+        - id: claude-haiku-4-5
+          name: Claude Haiku 4.5
+          maxTokens: 8000
+          inputModalities: [text, image]
+          reasoningEfforts: [low, medium, high]
+          defaultReasoningEffort: high
 
 - id: agent-default-model
   config:

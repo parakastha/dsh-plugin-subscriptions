@@ -7,6 +7,9 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { CodexAdapter, fetchCodexModels } from '../src/providers/codex.js'
 import { GrokAdapter } from '../src/providers/grok.js'
 import { ClaudeAdapter } from '../src/providers/claude.js'
@@ -15,7 +18,12 @@ import type { FetchFn } from '../src/providers/common.js'
 import type { ClaudeSession, CodexSession, GrokSession } from '../src/auth/store.js'
 
 const STATIC_CODEX = [{ id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' }]
-const STATIC_CLAUDE = [{ id: 'claude-opus-4-5', name: 'Claude Opus 4.5' }]
+const STATIC_CLAUDE = [{
+  id: 'claude-opus-4-5',
+  name: 'Claude Opus 4.5',
+  reasoningEfforts: ['low', 'medium', 'high', 'max'],
+  defaultReasoningEffort: 'high',
+}]
 const STATIC_GROK = [{ id: 'grok-4', name: 'Grok 4' }]
 
 const codexSession: CodexSession = {
@@ -87,6 +95,23 @@ function codexAdapter(overrides: {
   })
 }
 
+function claudeAdapter(session: ClaudeSession | undefined, models = STATIC_CLAUDE): ClaudeAdapter {
+  return new ClaudeAdapter({
+    models,
+    streamIdleTimeoutMs: 1000,
+    tokens: memoryTokens(session),
+    onWarn: () => {},
+    maxConcurrentRequests: 1,
+    maxStepsPerTurn: 8,
+    usageWarnPercent: 70,
+    usageBlockPercent: 85,
+    usageCacheTtlMs: 5000,
+    sessionStateTtlMs: 60_000,
+    sessionStatePath: join(tmpdir(), `dsh-plugin-subscriptions-models-${randomUUID()}.json`),
+    cliMaxTurns: 1,
+  })
+}
+
 const CODEX_MODELS_PAYLOAD = {
   models: [
     {
@@ -116,11 +141,7 @@ const CODEX_MODELS_PAYLOAD = {
 test('listModels returns [] when logged out (codex, claude, grok)', async () => {
   const codex = codexAdapter({})
   assert.deepEqual(await codex.listModels('codex'), [])
-  const claude = new ClaudeAdapter({
-    models: STATIC_CLAUDE,
-    streamIdleTimeoutMs: 1000,
-    tokens: memoryTokens<ClaudeSession>(undefined),
-  })
+  const claude = claudeAdapter(undefined)
   assert.deepEqual(await claude.listModels('claude'), [])
   const grok = new GrokAdapter({
     models: STATIC_GROK,
@@ -193,13 +214,12 @@ test('grok discovery maps the data array', async () => {
 })
 
 test('claude logged in returns the static catalog', async () => {
-  const claude = new ClaudeAdapter({
-    models: STATIC_CLAUDE,
-    streamIdleTimeoutMs: 1000,
-    tokens: memoryTokens(claudeSession),
-  })
+  const claude = claudeAdapter(claudeSession)
   const models = await claude.listModels('claude')
   assert.deepEqual(models.map(model => model.id), ['claude-opus-4-5'])
+  const resolved = await claude.resolveModel('claude', 'claude-opus-4-5')
+  assert.deepEqual(resolved.reasoning?.efforts.map(effort => effort.id), ['low', 'medium', 'high', 'max'])
+  assert.equal(resolved.reasoning?.defaultEffort, 'high')
 })
 
 test('fetchCodexModels tolerates entries without visibility or priority', async () => {
@@ -216,11 +236,7 @@ test('modalities: codex and claude declare image input; grok gates text-only mod
   const codexResolved = await codex.resolveModel('codex', 'gpt-5.1-codex')
   assert.deepEqual(codexResolved.inputModalities, ['text', 'image'])
 
-  const claude = new ClaudeAdapter({
-    models: STATIC_CLAUDE,
-    streamIdleTimeoutMs: 1000,
-    tokens: memoryTokens(claudeSession),
-  })
+  const claude = claudeAdapter(claudeSession)
   assert.deepEqual((await claude.listModels('claude'))[0].inputModalities, ['text', 'image'])
 
   const grok = new GrokAdapter({

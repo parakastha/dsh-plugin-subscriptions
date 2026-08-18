@@ -14,7 +14,7 @@ Logged-in providers join the session model picker with their live model catalogs
 
 ![Model picker with subscription models](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-picker.png)
 
-Models that advertise reasoning levels get an **Effort** selector in the same menu — Codex models, and Grok 4.6 / 4.5 (levels and defaults come from each provider's live catalog, not a hardcoded list):
+Models that advertise reasoning levels get an **Effort** selector in the same menu — Codex and Grok use their live catalogs, while configured Claude models expose the Agent SDK's supported levels:
 
 ![Reasoning effort selector](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-effort.png)
 
@@ -27,7 +27,7 @@ The `image_generate` tool renders its result inline in the conversation:
 | Route    | Subscription      | Models |
 |----------|-------------------|--------|
 | `codex`  | ChatGPT Plus/Pro  | live catalog from `chatgpt.com/backend-api/codex/models` |
-| `claude` | Claude Pro/Max    | claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 |
+| `claude` | Claude Pro/Max    | claude-opus-5, claude-sonnet-5, claude-haiku-4-5 |
 | `grok`   | X Premium (xAI)   | live catalog from `api.x.ai/v1/models` (chat models only); reasoning efforts from the Grok CLI catalog (`cli-chat-proxy.grok.com/v1/models`) |
 
 Only logged-in providers appear in the session model picker; the lists above refresh on login/logout. Vision-capable models declare `['text', 'image']` input modalities, and image content is translated to each provider's wire format.
@@ -117,6 +117,8 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
     models:                            # override the discovered/built-in catalogs
       codex:
         - { id: gpt-5.6-sol, name: GPT-5.6 Sol, contextWindow: 272000, inputModalities: [text, image] }
+      claude:
+        - { id: claude-opus-5, name: Claude Opus 5, contextWindow: 1000000, inputModalities: [text, image], reasoningEfforts: [low, medium, high, xhigh, max], defaultReasoningEffort: high }
 ```
 
 Claude requests use the Claude Agent SDK transport, keep one resumable Claude
