@@ -14,7 +14,7 @@ Logged-in providers join the session model picker with their live model catalogs
 
 ![Model picker with subscription models](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-picker.png)
 
-Models that advertise reasoning levels get an **Effort** selector in the same menu. Codex retains only GPT-5.6 and GPT-5.3-Codex models and uses their live catalog; Claude exposes effort only for Opus 5 and Sonnet 5 (Haiku 4.5 has no effort selector).
+Models that advertise reasoning levels get an **Effort** selector in the same menu. Codex retains only GPT-5.6 and GPT-5.3-Codex models and uses their live catalog; Claude exposes effort for Opus 5, Fable 5, and Sonnet 5 (Haiku 4.5 has no effort selector).
 
 ![Reasoning effort selector](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-effort.png)
 
@@ -27,10 +27,10 @@ The `image_generate` tool renders its result inline in the conversation:
 | Route    | Subscription      | Models |
 |----------|-------------------|--------|
 | `codex`  | ChatGPT Plus/Pro  | live catalog from `chatgpt.com/backend-api/codex/models` |
-| `claude` | Claude Pro/Max    | claude-opus-5, claude-sonnet-5, claude-haiku-4-5 |
+| `claude` | Claude Pro/Max    | claude-opus-5, claude-fable-5, claude-sonnet-5, claude-haiku-4-5 |
 | `grok`   | X Premium (xAI)   | live catalog from `api.x.ai/v1/models` (chat models only); reasoning efforts from the Grok CLI catalog (`cli-chat-proxy.grok.com/v1/models`) |
 
-Only logged-in providers appear in the session model picker; the lists above refresh on login/logout. Vision-capable models declare `['text', 'image']` input modalities, and image content is translated to each provider's wire format. Codex keeps GPT-5.6 Sol/Terra/Luna and GPT-5.3-Codex only; Claude keeps Opus 5, Sonnet 5, and Haiku 4.5 only.
+Only logged-in providers appear in the session model picker; the lists above refresh on login/logout. Vision-capable models declare `['text', 'image']` input modalities, and image content is translated to each provider's wire format. Codex keeps GPT-5.6 Sol/Terra/Luna and GPT-5.3-Codex only; Claude keeps Opus 5, Fable 5, Sonnet 5, and Haiku 4.5 only.
 
 Logged-in cards also show **subscription usage** — per rate-limit window (5-hour session, weekly, and per-model weekly where the plan has one) with the used percentage, a progress bar, and the reset time, plus a Refresh button. Codex usage comes from `chatgpt.com/backend-api/wham/usage` (also reports the plan), Claude usage from `api.anthropic.com/api/oauth/usage`, and Grok usage from the Grok Build CLI proxy's `cli-chat-proxy.grok.com/v1/billing` (the source of the CLI's `/usage` panel; reports the shared weekly pool and the subscription tier).
 
@@ -121,7 +121,7 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
         - { id: claude-opus-5, name: Claude Opus 5, contextWindow: 1000000, inputModalities: [text, image], reasoningEfforts: [low, medium, high, xhigh, max], defaultReasoningEffort: high }
 ```
 
-GPT-5.6 models expose **Standard** and **Fast** in DSH's model picker. The choice is session-scoped; Fast maps only that session's requests to the Codex subscription `service_tier: fast` wire value.
+GPT-5.6 models expose **Standard** and **Fast** in DSH's model picker. The choice is session-scoped; Fast maps only that session's requests to the Codex subscription `service_tier: priority` wire value.
 
 Claude requests use the Claude Agent SDK transport, keep one resumable Claude
 session per DSH session, and send only new user/tool-result messages after the

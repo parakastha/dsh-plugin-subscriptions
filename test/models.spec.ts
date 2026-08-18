@@ -24,6 +24,7 @@ type ServiceTierOptions = GenerateOptions & { serviceTier?: string }
 const STATIC_CODEX = [{ id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' }]
 const STATIC_CLAUDE = [
   { id: 'claude-opus-5', name: 'Claude Opus 5' },
+  { id: 'claude-fable-5', name: 'Claude Fable 5' },
   { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
   { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
 ]
@@ -226,7 +227,7 @@ test('codex exposes supported speeds and sends each selected tier on the wire', 
   const fastModel = await adapter.resolveModel('codex', 'gpt-5.6-terra') as ServiceTierModel
   assert.deepEqual(fastModel.serviceTiers, {
     tiers: [{
-      id: 'fast',
+      id: 'priority',
       name: 'Fast',
       description: 'Faster responses with higher subscription usage',
     }],
@@ -235,7 +236,7 @@ test('codex exposes supported speeds and sends each selected tier on the wire', 
   assert.equal(sparkModel.serviceTiers, undefined)
 
   for (const request of [
-    { model: 'gpt-5.6-terra', serviceTier: 'fast' },
+    { model: 'gpt-5.6-terra', serviceTier: 'priority' },
     { model: 'gpt-5.6-terra' },
   ] satisfies { model: string; serviceTier?: string }[]) {
     const options: ServiceTierOptions = { provider: 'codex', ...request, messages: [] }
@@ -245,12 +246,12 @@ test('codex exposes supported speeds and sends each selected tier on the wire', 
       }
     }, /codex API/)
   }
-  assert.equal(requestBodies[0]?.service_tier, 'fast')
+  assert.equal(requestBodies[0]?.service_tier, 'priority')
   assert.equal(requestBodies[1]?.service_tier, 'default')
 
   await assert.rejects(async () => {
     const options: ServiceTierOptions = {
-      provider: 'codex', model: 'gpt-5.3-codex-spark', serviceTier: 'fast', messages: [],
+      provider: 'codex', model: 'gpt-5.3-codex-spark', serviceTier: 'priority', messages: [],
     }
     for await (const _ of adapter.stream(options)) void _
   }, /does not support service tier/)
@@ -309,10 +310,16 @@ test('grok discovery maps the data array', async () => {
 test('claude serves only current models and only exposes officially supported efforts', async () => {
   const claude = claudeAdapter(claudeSession)
   const models = await claude.listModels('claude')
-  assert.deepEqual(models.map(model => model.id), ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'])
+  assert.deepEqual(models.map(model => model.id), [
+    'claude-opus-5', 'claude-fable-5', 'claude-sonnet-5', 'claude-haiku-4-5',
+  ])
   const resolved = await claude.resolveModel('claude', 'claude-opus-5')
   assert.deepEqual(resolved.reasoning?.efforts.map(effort => effort.id), ['low', 'medium', 'high', 'xhigh', 'max'])
   assert.equal(resolved.reasoning?.defaultEffort, 'high')
+  assert.deepEqual(
+    (await claude.resolveModel('claude', 'claude-fable-5')).reasoning?.efforts.map(effort => effort.id),
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+  )
   assert.equal((await claude.resolveModel('claude', 'claude-haiku-4-5')).reasoning, undefined)
   await assert.rejects(claude.resolveModel('claude', 'claude-opus-4-5'), /retired in this profile/)
 })

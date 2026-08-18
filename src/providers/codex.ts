@@ -69,7 +69,8 @@ const CODEX_GPT_5_6_ULTRA_EFFORTS = [
   { id: ReasoningEffortId('ultra'), name: 'Ultra' },
 ] as const
 const CODEX_DEFAULT_EFFORT = ReasoningEffortId('high')
-const CODEX_FAST_TIER = 'fast'
+/** Codex displays this service tier as Fast; the API wire value is `priority`. */
+const CODEX_FAST_TIER = 'priority'
 /** Every gpt-5.x codex model accepts image input. */
 const CODEX_MODALITIES: readonly ('text' | 'image')[] = ['text', 'image']
 
@@ -571,7 +572,7 @@ export class CodexAdapter extends LlmAdapter {
         : {},
       tool_choice: 'auto',
       parallel_tool_calls: true,
-      service_tier: serviceTier === CODEX_FAST_TIER ? 'fast' : 'default',
+      service_tier: serviceTier === CODEX_FAST_TIER ? 'priority' : 'default',
       ...options.reasoningEffort !== undefined
         ? { reasoning: { effort: String(options.reasoningEffort), summary: 'auto' } }
         : {},

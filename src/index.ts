@@ -153,6 +153,10 @@ const DEFAULT_MODELS: Record<ProviderId, ModelEntry[]> = {
       reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'high',
     },
     {
+      id: 'claude-fable-5', name: 'Claude Fable 5', maxTokens: 16_000,
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'high',
+    },
+    {
       id: 'claude-sonnet-5', name: 'Claude Sonnet 5', maxTokens: 16_000,
       reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'high',
     },

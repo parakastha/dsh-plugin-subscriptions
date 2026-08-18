@@ -319,23 +319,32 @@ const CLAUDE_MODALITIES: readonly ('text' | 'image')[] = ['text', 'image']
 
 const CLAUDE_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
+const CURRENT_CLAUDE_MODELS = new Set([
+  'claude-opus-5',
+  'claude-fable-5',
+  'claude-sonnet-5',
+  'claude-haiku-4-5',
+])
+
 /** Current Claude subscription families retained by this adapter. */
 export function isCurrentClaudeModel(model: string): boolean {
-  return model === 'claude-opus-5' || model === 'claude-sonnet-5' || model === 'claude-haiku-4-5'
+  return CURRENT_CLAUDE_MODELS.has(model)
 }
 
 function assertCurrentClaudeModel(model: string): void {
   if (!isCurrentClaudeModel(model)) {
     throw new LlmError(
-      `Claude model "${model}" is retired in this profile; select Claude Opus 5, Sonnet 5, or Haiku 4.5.`,
+      `Claude model "${model}" is retired in this profile; select Claude Opus 5, Fable 5, Sonnet 5, or Haiku 4.5.`,
       'UNSUPPORTED_MODEL',
     )
   }
 }
 
-/** Anthropic exposes effort only for the current Opus and Sonnet families. */
+/** Anthropic exposes effort for Opus, Fable, and Sonnet; Haiku has no selector. */
 function claudeReasoningEfforts(model: string): readonly string[] | undefined {
-  return model === 'claude-opus-5' || model === 'claude-sonnet-5' ? CLAUDE_REASONING_EFFORTS : undefined
+  return model === 'claude-opus-5' || model === 'claude-fable-5' || model === 'claude-sonnet-5'
+    ? CLAUDE_REASONING_EFFORTS
+    : undefined
 }
 
 /** Claude wire adapter: one instance serves the `claude` provider route. */
