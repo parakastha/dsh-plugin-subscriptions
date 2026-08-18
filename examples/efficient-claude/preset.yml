@@ -1,0 +1,3 @@
+name: Efficient Claude
+description: Claude-only coding mode with early compaction, bounded context, and no model-spawning delegation tools.
+order: 0

@@ -105,15 +105,39 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
   config:
     providers: [codex, claude]        # subset; default all three
     streamIdleTimeoutMs: 300000
+    claude:
+      maxConcurrentRequests: 1        # serialize Claude subscription calls
+      maxStepsPerTurn: 8               # stop repeated tool loops
+      usageWarnPercent: 70
+      usageBlockPercent: 85            # reject before sending at/above this limit
+      usageCacheTtlMs: 5000
+      sessionStateTtlMs: 21600000      # keep DSH -> Claude resume mappings for 6h
+      # sessionStatePath defaults to ~/.dsh/plugins/subscriptions/claude-sessions.json
+      cliMaxTurns: 1                    # no hidden second Claude turn
     models:                            # override the discovered/built-in catalogs
       codex:
         - { id: gpt-5.6-sol, name: GPT-5.6 Sol, contextWindow: 272000, inputModalities: [text, image] }
 ```
 
+Claude requests use the Claude Agent SDK transport, keep one resumable Claude
+session per DSH session, and send only new user/tool-result messages after the
+first request. Resume mappings survive DSH restarts; the state file contains
+only Claude session ids, message counts, and SHA-256 fingerprints—not prompts,
+tool definitions, or tokens. The adapter disables Claude Code's built-in tools,
+skills, plugins, agents, MCP settings, and filesystem settings so DSH remains
+the sole tool and instruction layer. Usage lookup fails closed: if remaining
+quota cannot be verified, no model request is sent.
+
+For a Claude-only profile, copy `examples/efficient-claude` into the profile's
+`.agent-presets/efficient-claude` directory. It keeps one model lane, caps the
+standing instructions, prunes large tool output, and compacts early with Haiku.
+The companion `examples/efficient-claude-profile.patch.yml` disables the hidden
+LLM title request and selects this preset by default.
+
 ## Develop
 
 ```sh
-pnpm install   # devDependencies link into a local deepseek-harness checkout — edit the paths first
+pnpm install   # installs the published dsh development packages
 pnpm build     # tsc (lib/) + tsdown (lib/client.js browser bundle)
 pnpm test      # node --test over compiled unit specs
 ```

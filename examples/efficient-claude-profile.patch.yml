@@ -1,0 +1,27 @@
+# Apply this after installing examples/efficient-claude as a DSH agent preset.
+# It removes the hidden title request and makes one Claude lane the default.
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: efficient-claude
+
+- id: session-title-llm
+  disabled: true
+
+- id: llm-subscriptions
+  name: dsh-plugin-subscriptions
+  config:
+    providers: [claude]
+    claude:
+      maxConcurrentRequests: 1
+      maxStepsPerTurn: 8
+      usageWarnPercent: 70
+      usageBlockPercent: 85
+      usageCacheTtlMs: 5000
+      sessionStateTtlMs: 21600000
+      cliMaxTurns: 1
+
+- id: agent-default-model
+  config:
+    provider: claude
+    model: claude-opus-5
