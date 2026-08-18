@@ -480,7 +480,12 @@ export class ClaudeAdapter extends LlmAdapter {
           name: tool.name,
           description: tool.description,
           inputSchema: jsonSchemaToZod(tool.parameters),
-          handler: async () => ({ content: [{ type: 'text' as const, text: 'DeepSeek Harness executes this tool out of band.' }], isError: true }),
+          // The query is aborted as soon as its tool_use frame reaches DSH,
+          // which executes the call and feeds its real result into the next
+          // resumed message. Do not leave an error result in Claude's durable
+          // session before that handoff: it makes a successful DSH call look
+          // like a denied tool invocation on the following step.
+          handler: async () => ({ content: [{ type: 'text' as const, text: 'DeepSeek Harness will return this tool result in the next message.' }] }),
         })),
       })
     }
