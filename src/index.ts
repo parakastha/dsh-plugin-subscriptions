@@ -234,8 +234,9 @@ class SubscriptionsAuthController implements AuthController {
   async status(provider: ProviderId): Promise<ProviderStatus> {
     const session = await getSession(provider)
     const account = accountOf(provider, session)
-    // The plan name is shown by the usage section, so `detail` only carries errors.
-    const detail = this.lastError.get(provider)
+    // A usable stored session supersedes an earlier failed OAuth attempt. This
+    // also keeps externally restored sessions from looking broken in Settings.
+    const detail = session === undefined ? this.lastError.get(provider) : undefined
     return {
       loggedIn: session !== undefined,
       busy: this.flows.isBusy(provider),
