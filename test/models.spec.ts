@@ -122,6 +122,8 @@ const CODEX_MODELS_PAYLOAD = {
       supported_reasoning_levels: [
         { effort: 'low', description: 'fast' },
         { effort: 'high', description: 'thorough' },
+        { effort: 'max' },
+        { effort: 'ultra' },
       ],
       default_reasoning_level: 'high',
       visibility: 'list',
@@ -173,13 +175,44 @@ test('resolveModel prefers discovered context window and reasoning efforts', asy
   assert.equal(resolved.context?.contextWindow, 500_000)
   assert.deepEqual(
     resolved.reasoning?.efforts.map(effort => effort.id),
-    ['low', 'high'],
+    ['low', 'high', 'max', 'ultra'],
   )
   assert.equal(resolved.reasoning?.defaultEffort, 'high')
   // A model the catalog did not advertise falls back to static defaults.
   const fallback = await adapter.resolveModel('codex', 'gpt-unknown')
   assert.equal(fallback.context?.contextWindow, 400_000)
-  assert.equal(fallback.reasoning?.efforts.length, 5)
+  assert.deepEqual(fallback.reasoning?.efforts.map(effort => effort.id), ['low', 'medium', 'high', 'xhigh'])
+})
+
+test('codex gpt-5.6 fallback exposes the documented max level and live ultra variants', async () => {
+  const adapter = codexAdapter({ session: codexSession, discovery: false })
+  assert.deepEqual(
+    (await adapter.resolveModel('codex', 'gpt-5.6-terra')).reasoning?.efforts.map(effort => effort.id),
+    ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+  )
+  assert.deepEqual(
+    (await adapter.resolveModel('codex', 'gpt-5.6-luna')).reasoning?.efforts.map(effort => effort.id),
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+  )
+})
+
+test('codex retains a listed model\'s efforts after the catalog refresh TTL', async () => {
+  const { fetchFn } = fakeFetch(CODEX_MODELS_PAYLOAD)
+  const adapter = codexAdapter({ session: codexSession, fetchFn })
+  const actualNow = Date.now
+  let now = actualNow()
+  Date.now = () => now
+  try {
+    await adapter.listModels('codex')
+    now += 5 * 60_000
+    const resolved = await adapter.resolveModel('codex', 'gpt-5.2-codex')
+    assert.deepEqual(
+      resolved.reasoning?.efforts.map(effort => effort.id),
+      ['low', 'high', 'max', 'ultra'],
+    )
+  } finally {
+    Date.now = actualNow
+  }
 })
 
 test('codex discovery failure falls back to the static catalog with a warning', async () => {

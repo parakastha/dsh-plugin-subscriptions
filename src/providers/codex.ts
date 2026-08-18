@@ -10,6 +10,7 @@ import type {
   GenerateOptions,
   LlmModelInfo,
   LlmProviderInfo,
+  LlmReasoningEffortInfo,
   LlmResolvedModelInfo,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
@@ -54,15 +55,29 @@ const PERMANENT_REFRESH_CODES = new Set([
 ])
 
 const CODEX_EFFORTS = [
-  { id: ReasoningEffortId('minimal'), name: 'Minimal' },
   { id: ReasoningEffortId('low'), name: 'Low' },
   { id: ReasoningEffortId('medium'), name: 'Medium' },
   { id: ReasoningEffortId('high'), name: 'High' },
   { id: ReasoningEffortId('xhigh'), name: 'Extra High' },
 ] as const
+const CODEX_GPT_5_6_EFFORTS = [
+  ...CODEX_EFFORTS,
+  { id: ReasoningEffortId('max'), name: 'Max' },
+] as const
+const CODEX_GPT_5_6_ULTRA_EFFORTS = [
+  ...CODEX_GPT_5_6_EFFORTS,
+  { id: ReasoningEffortId('ultra'), name: 'Ultra' },
+] as const
 const CODEX_DEFAULT_EFFORT = ReasoningEffortId('high')
 /** Every gpt-5.x codex model accepts image input. */
 const CODEX_MODALITIES: readonly ('text' | 'image')[] = ['text', 'image']
+
+/** Fallback effort metadata for a selected Codex model before live discovery completes. */
+function fallbackCodexEfforts(model: string): readonly LlmReasoningEffortInfo[] {
+  if (model === 'gpt-5.6-sol' || model === 'gpt-5.6-terra') return CODEX_GPT_5_6_ULTRA_EFFORTS
+  if (model === 'gpt-5.6-luna') return CODEX_GPT_5_6_EFFORTS
+  return CODEX_EFFORTS
+}
 
 /** Static codex flow facts for the OAuth flow engine. */
 export const codexFlow: FlowSpec = {
@@ -456,10 +471,10 @@ export class CodexAdapter extends LlmAdapter {
   }
 
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
-    // Discovered metadata (when discovery is on and the cache is warm) wins
-    // over the static entry; the static entry wins over the built-in defaults.
+    // Last-known discovered metadata wins over the static entry and stays
+    // available across the refresh TTL; the static entry wins over defaults.
     const discovered = this.options.discovery
-      ? this.catalog.cached()?.find(entry => entry.id === model)
+      ? this.catalog.latest()?.find(entry => entry.id === model)
       : undefined
     const configured = this.options.models.find(entry => entry.id === model)
     return Promise.resolve({
@@ -470,7 +485,7 @@ export class CodexAdapter extends LlmAdapter {
       inputModalities: configured?.inputModalities ?? CODEX_MODALITIES,
       context: { contextWindow: discovered?.contextWindow ?? configured?.contextWindow ?? CODEX_CONTEXT_WINDOW },
       defaultMaxTokens: configured?.maxTokens ?? CODEX_DEFAULT_MAX_TOKENS,
-      reasoning: discovered?.reasoning ?? { efforts: CODEX_EFFORTS, defaultEffort: CODEX_DEFAULT_EFFORT },
+      reasoning: discovered?.reasoning ?? { efforts: fallbackCodexEfforts(model), defaultEffort: CODEX_DEFAULT_EFFORT },
     })
   }
 

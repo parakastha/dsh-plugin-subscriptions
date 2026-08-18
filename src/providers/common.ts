@@ -408,6 +408,20 @@ export class ModelCatalogCache {
   }
 
   /**
+   * The last successfully discovered catalog, even after its refresh TTL.
+   *
+   * A caller that already showed a model's advertised capabilities must keep
+   * resolving that selection against the same capability metadata while the
+   * next list operation refreshes it. Otherwise a selected live-only effort
+   * can be rejected merely because the catalog became stale between listing
+   * the model and starting its next turn.
+   * @returns the last successful catalog, if this adapter has discovered one.
+   */
+  latest(): readonly DiscoveredModel[] | undefined {
+    return this.entry?.models
+  }
+
+  /**
    * Return the cached catalog when fresh, otherwise fetch and cache it.
    * @param fetcher - performs the provider's model-list request.
    * @returns the discovered models.
