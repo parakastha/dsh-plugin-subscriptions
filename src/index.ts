@@ -95,6 +95,11 @@ export interface Config {
     claude?: ModelEntry[]
     grok?: ModelEntry[]
   }
+  /** Codex subscription request controls. */
+  codex?: {
+    /** Standard uses normal processing; Fast requests the paid low-latency tier. */
+    speed?: 'standard' | 'fast'
+  }
   /** Claude subscription safeguards and persistent CLI-session limits. */
   claude?: {
     maxConcurrentRequests?: number
@@ -127,6 +132,9 @@ export const Config: z<Config> = z.object({
     claude: z.array(modelEntrySchema),
     grok: z.array(modelEntrySchema),
   }),
+  codex: z.object({
+    speed: z.union(['standard', 'fast']).default('standard'),
+  }),
   claude: z.object({
     maxConcurrentRequests: z.number().step(1).min(1).default(DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS),
     maxStepsPerTurn: z.number().step(1).min(1).default(DEFAULT_CLAUDE_MAX_STEPS_PER_TURN),
@@ -142,9 +150,10 @@ export const Config: z<Config> = z.object({
 /** Built-in catalogs used when the config does not override a provider's models. */
 const DEFAULT_MODELS: Record<ProviderId, ModelEntry[]> = {
   codex: [
-    { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
-    { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini' },
-    { id: 'gpt-5.1', name: 'GPT-5.1' },
+    { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+    { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+    { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+    { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
   ],
   claude: [
     {
@@ -157,7 +166,6 @@ const DEFAULT_MODELS: Record<ProviderId, ModelEntry[]> = {
     },
     {
       id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', maxTokens: 8_000,
-      reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'high',
     },
   ],
   grok: [
@@ -319,6 +327,7 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error(`${name}: streamIdleTimeoutMs must be a positive finite number`)
   }
   const catalog = resolveCatalog(config.models)
+  const codexConfig = { speed: config.codex?.speed ?? 'standard' as const }
   const claudeConfig = {
     maxConcurrentRequests: config.claude?.maxConcurrentRequests ?? DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS,
     maxStepsPerTurn: config.claude?.maxStepsPerTurn ?? DEFAULT_CLAUDE_MAX_STEPS_PER_TURN,
@@ -383,6 +392,7 @@ export function apply(ctx: Context, config: Config): void {
           streamIdleTimeoutMs,
           tokens,
           discovery: !overridden.has('codex'),
+          speed: codexConfig.speed,
           onWarn,
           resolveAttachments,
         })))

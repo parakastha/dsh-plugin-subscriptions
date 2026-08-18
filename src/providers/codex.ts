@@ -72,6 +72,28 @@ const CODEX_DEFAULT_EFFORT = ReasoningEffortId('high')
 /** Every gpt-5.x codex model accepts image input. */
 const CODEX_MODALITIES: readonly ('text' | 'image')[] = ['text', 'image']
 
+/** Current Codex subscription families retained by this adapter. */
+export function isCurrentCodexModel(model: string): boolean {
+  return model === 'gpt-5.6-sol'
+    || model === 'gpt-5.6-terra'
+    || model === 'gpt-5.6-luna'
+    || model.startsWith('gpt-5.3-codex')
+}
+
+/** Fast mode is supported by the GPT-5.6 family; Codex-Spark is already its own fast model. */
+function supportsCodexFastMode(model: string): boolean {
+  return model === 'gpt-5.6-sol' || model === 'gpt-5.6-terra' || model === 'gpt-5.6-luna'
+}
+
+function assertCurrentCodexModel(model: string): void {
+  if (!isCurrentCodexModel(model)) {
+    throw new LlmError(
+      `Codex model "${model}" is retired in this profile; select a GPT-5.6 or GPT-5.3-Codex model.`,
+      'UNSUPPORTED_MODEL',
+    )
+  }
+}
+
 /** Fallback effort metadata for a selected Codex model before live discovery completes. */
 function fallbackCodexEfforts(model: string): readonly LlmReasoningEffortInfo[] {
   if (model === 'gpt-5.6-sol' || model === 'gpt-5.6-terra') return CODEX_GPT_5_6_ULTRA_EFFORTS
@@ -364,6 +386,7 @@ export async function fetchCodexModels(session: CodexSession, fetchFn: FetchFn =
     // codex-rs ModelVisibility: only "list" is picker-visible; hide/none are
     // dropped, and an absent or unknown value is included (in doubt, include).
     if (entry.visibility === 'hide' || entry.visibility === 'none') continue
+    if (!isCurrentCodexModel(entry.slug)) continue
     const efforts = (entry.supported_reasoning_levels ?? [])
       .filter(level => typeof level.effort === 'string' && level.effort.length > 0)
       .map(level => ({
@@ -410,6 +433,8 @@ export interface CodexAdapterOptions {
   tokens: TokenManager<CodexSession>
   /** Whether to fetch the live catalog when logged in (false when config `models` overrides). */
   discovery: boolean
+  /** Subscription processing speed: standard pricing or the paid Fast tier. */
+  speed?: 'standard' | 'fast'
   /** Warning sink for discovery failures that fall back to the static catalog. */
   onWarn?: (message: string) => void
   /** Fetch implementation for discovery (defaults to global fetch). */
@@ -431,7 +456,7 @@ export class CodexAdapter extends LlmAdapter {
   }
 
   private staticModels(provider: string): LlmModelInfo[] {
-    return this.options.models.map(model => ({
+    return this.options.models.filter(model => isCurrentCodexModel(model.id)).map(model => ({
       provider,
       id: model.id,
       name: model.name ?? model.id,
@@ -471,6 +496,11 @@ export class CodexAdapter extends LlmAdapter {
   }
 
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    try {
+      assertCurrentCodexModel(model)
+    } catch (error) {
+      return Promise.reject(error)
+    }
     // Last-known discovered metadata wins over the static entry and stays
     // available across the refresh TTL; the static entry wins over defaults.
     const discovered = this.options.discovery
@@ -490,6 +520,7 @@ export class CodexAdapter extends LlmAdapter {
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    assertCurrentCodexModel(options.model)
     const watchdog = idleWatchdog(options.signal, this.options.streamIdleTimeoutMs)
     try {
       let session = await this.options.tokens.session()
@@ -523,6 +554,7 @@ export class CodexAdapter extends LlmAdapter {
         : {},
       tool_choice: 'auto',
       parallel_tool_calls: true,
+      service_tier: this.options.speed === 'fast' && supportsCodexFastMode(options.model) ? 'fast' : 'default',
       ...options.reasoningEffort !== undefined
         ? { reasoning: { effort: String(options.reasoningEffort), summary: 'auto' } }
         : {},
@@ -531,7 +563,7 @@ export class CodexAdapter extends LlmAdapter {
       include: ['reasoning.encrypted_content'],
       ...options.sessionId !== undefined ? { prompt_cache_key: String(options.sessionId) } : {},
     }
-    return fetch(CODEX_API_URL, {
+    return (this.options.fetchFn ?? fetch)(CODEX_API_URL, {
       method: 'POST',
       headers: {
         'authorization': `Bearer ${session.accessToken}`,

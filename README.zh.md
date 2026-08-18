@@ -14,7 +14,7 @@
 
 ![模型选择器中的订阅模型](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-picker.png)
 
-声明了推理等级的模型会在同一菜单里多出**推理等级**选择 —— Codex 和 Grok 使用实时目录,配置的 Claude 模型使用 Agent SDK 支持的档位:
+声明了推理等级的模型会在同一菜单里多出**推理等级**选择。Codex 仅保留 GPT-5.6 和 GPT-5.3-Codex，并使用实时目录；Claude 仅为 Opus 5 和 Sonnet 5 提供推理等级，Haiku 4.5 不显示该选择器：
 
 ![推理等级选择器](https://raw.githubusercontent.com/V1ki/dsh-plugin-subscriptions/main/docs/images/model-effort.png)
 
@@ -30,7 +30,7 @@
 | `claude` | Claude Pro/Max   | claude-opus-5、claude-sonnet-5、claude-haiku-4-5 |
 | `grok`   | X Premium (xAI)  | 从 `api.x.ai/v1/models` 实时获取(仅对话模型);推理等级来自 Grok CLI 目录(`cli-chat-proxy.grok.com/v1/models`) |
 
-只有已登录的 provider 才会出现在会话模型选择器里;登录/退出后列表自动刷新。支持视觉的模型会声明 `['text', 'image']` 输入模态,图片内容会被翻译成各 provider 的 wire 格式。
+只有已登录的 provider 才会出现在会话模型选择器里;登录/退出后列表自动刷新。支持视觉的模型会声明 `['text', 'image']` 输入模态,图片内容会被翻译成各 provider 的 wire 格式。Codex 仅保留 GPT-5.6 Sol/Terra/Luna 和 GPT-5.3-Codex；Claude 仅保留 Opus 5、Sonnet 5 和 Haiku 4.5。
 
 已登录的卡片还会显示**订阅用量**——按限额窗口(5 小时会话窗、每周窗,以及计划包含的按模型每周窗)展示已用百分比、进度条和重置时间,并带刷新按钮。Codex 用量来自 `chatgpt.com/backend-api/wham/usage`(同时报告计划类型),Claude 用量来自 `api.anthropic.com/api/oauth/usage`,Grok 用量来自 Grok Build CLI 代理的 `cli-chat-proxy.grok.com/v1/billing`(即 CLI `/usage` 面板的数据源,报告共享每周额度和订阅档位)。
 
@@ -105,6 +105,8 @@ GitHub 安装的:重新执行一遍 `add github:V1ki/dsh-plugin-subscriptions` �
   config:
     providers: [codex, claude]        # 子集;默认三个全启用
     streamIdleTimeoutMs: 300000
+    codex:
+      speed: standard                  # standard | fast；Fast 将 GPT-5.6 请求映射为 OpenAI service_tier: fast
     models:                            # 覆盖实时发现/内置目录
       codex:
         - { id: gpt-5.6-sol, name: GPT-5.6 Sol, contextWindow: 272000, inputModalities: [text, image] }

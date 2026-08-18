@@ -17,13 +17,12 @@ import { TokenManager } from '../src/providers/common.js'
 import type { FetchFn } from '../src/providers/common.js'
 import type { ClaudeSession, CodexSession, GrokSession } from '../src/auth/store.js'
 
-const STATIC_CODEX = [{ id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' }]
-const STATIC_CLAUDE = [{
-  id: 'claude-opus-4-5',
-  name: 'Claude Opus 4.5',
-  reasoningEfforts: ['low', 'medium', 'high', 'max'],
-  defaultReasoningEffort: 'high',
-}]
+const STATIC_CODEX = [{ id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' }]
+const STATIC_CLAUDE = [
+  { id: 'claude-opus-5', name: 'Claude Opus 5' },
+  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
+  { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+]
 const STATIC_GROK = [{ id: 'grok-4', name: 'Grok 4' }]
 
 const codexSession: CodexSession = {
@@ -115,8 +114,8 @@ function claudeAdapter(session: ClaudeSession | undefined, models = STATIC_CLAUD
 const CODEX_MODELS_PAYLOAD = {
   models: [
     {
-      slug: 'gpt-5.2-codex',
-      display_name: 'GPT-5.2 Codex',
+      slug: 'gpt-5.6-terra',
+      display_name: 'GPT-5.6 Terra',
       description: 'newest',
       context_window: 500_000,
       supported_reasoning_levels: [
@@ -130,11 +129,12 @@ const CODEX_MODELS_PAYLOAD = {
       priority: 2,
     },
     {
-      slug: 'gpt-5.1-codex',
-      display_name: 'GPT-5.1 Codex',
+      slug: 'gpt-5.3-codex-spark',
+      display_name: 'GPT-5.3 Codex Spark',
       visibility: 'list',
       priority: 1,
     },
+    { slug: 'gpt-5.5', display_name: 'Legacy GPT-5.5', visibility: 'list', priority: 0 },
     { slug: 'gpt-hidden', display_name: 'Hidden', visibility: 'hide', priority: 0 },
     { slug: 'gpt-none', display_name: 'None', visibility: 'none', priority: 0 },
   ],
@@ -159,8 +159,8 @@ test('codex discovery maps, filters hidden entries, and sorts by priority', asyn
   const { fetchFn, calls } = fakeFetch(CODEX_MODELS_PAYLOAD)
   const adapter = codexAdapter({ session: codexSession, fetchFn })
   const models = await adapter.listModels('codex')
-  assert.deepEqual(models.map(model => model.id), ['gpt-5.1-codex', 'gpt-5.2-codex'])
-  assert.equal(models[1].name, 'GPT-5.2 Codex')
+  assert.deepEqual(models.map(model => model.id), ['gpt-5.3-codex-spark', 'gpt-5.6-terra'])
+  assert.equal(models[1].name, 'GPT-5.6 Terra')
   assert.equal(models[1].description, 'newest')
   // The TTL cache serves the second call without another fetch.
   await adapter.listModels('codex')
@@ -171,15 +171,15 @@ test('resolveModel prefers discovered context window and reasoning efforts', asy
   const { fetchFn } = fakeFetch(CODEX_MODELS_PAYLOAD)
   const adapter = codexAdapter({ session: codexSession, fetchFn })
   await adapter.listModels('codex')
-  const resolved = await adapter.resolveModel('codex', 'gpt-5.2-codex')
+  const resolved = await adapter.resolveModel('codex', 'gpt-5.6-terra')
   assert.equal(resolved.context?.contextWindow, 500_000)
   assert.deepEqual(
     resolved.reasoning?.efforts.map(effort => effort.id),
     ['low', 'high', 'max', 'ultra'],
   )
   assert.equal(resolved.reasoning?.defaultEffort, 'high')
-  // A model the catalog did not advertise falls back to static defaults.
-  const fallback = await adapter.resolveModel('codex', 'gpt-unknown')
+  // A current model that the catalog did not advertise falls back to static defaults.
+  const fallback = await adapter.resolveModel('codex', 'gpt-5.3-codex')
   assert.equal(fallback.context?.contextWindow, 400_000)
   assert.deepEqual(fallback.reasoning?.efforts.map(effort => effort.id), ['low', 'medium', 'high', 'xhigh'])
 })
@@ -196,6 +196,41 @@ test('codex gpt-5.6 fallback exposes the documented max level and live ultra var
   )
 })
 
+test('codex rejects retired models before provider I/O', async () => {
+  const adapter = codexAdapter({ session: codexSession, discovery: false })
+  await assert.rejects(adapter.resolveModel('codex', 'gpt-5.5'), /retired in this profile/)
+  await assert.rejects(async () => {
+    for await (const _ of adapter.stream({ provider: 'codex', model: 'gpt-5.5', messages: [] })) {
+      void _
+    }
+  }, /retired in this profile/)
+})
+
+test('codex sends the selected official processing speed on the wire', async () => {
+  const requestBodies: Record<string, unknown>[] = []
+  const requestFetch: FetchFn = async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+    return new Response(JSON.stringify({ error: { message: 'test request' } }), { status: 400 })
+  }
+  const adapter = new CodexAdapter({
+    models: STATIC_CODEX,
+    streamIdleTimeoutMs: 1000,
+    tokens: memoryTokens(codexSession),
+    discovery: false,
+    speed: 'fast',
+    fetchFn: requestFetch,
+  })
+  for (const model of ['gpt-5.6-terra', 'gpt-5.3-codex-spark']) {
+    await assert.rejects(async () => {
+      for await (const _ of adapter.stream({ provider: 'codex', model, messages: [] })) {
+        void _
+      }
+    }, /codex API/)
+  }
+  assert.equal(requestBodies[0]?.service_tier, 'fast')
+  assert.equal(requestBodies[1]?.service_tier, 'default')
+})
+
 test('codex retains a listed model\'s efforts after the catalog refresh TTL', async () => {
   const { fetchFn } = fakeFetch(CODEX_MODELS_PAYLOAD)
   const adapter = codexAdapter({ session: codexSession, fetchFn })
@@ -205,7 +240,7 @@ test('codex retains a listed model\'s efforts after the catalog refresh TTL', as
   try {
     await adapter.listModels('codex')
     now += 5 * 60_000
-    const resolved = await adapter.resolveModel('codex', 'gpt-5.2-codex')
+    const resolved = await adapter.resolveModel('codex', 'gpt-5.6-terra')
     assert.deepEqual(
       resolved.reasoning?.efforts.map(effort => effort.id),
       ['low', 'high', 'max', 'ultra'],
@@ -220,7 +255,7 @@ test('codex discovery failure falls back to the static catalog with a warning', 
   const { fetchFn } = fakeFetch({ error: 'boom' }, 500)
   const adapter = codexAdapter({ session: codexSession, fetchFn, warnings })
   const models = await adapter.listModels('codex')
-  assert.deepEqual(models.map(model => model.id), ['gpt-5.1-codex'])
+  assert.deepEqual(models.map(model => model.id), ['gpt-5.6-terra'])
   assert.equal(warnings.length, 1)
   assert.match(warnings[0], /codex model discovery failed/)
 })
@@ -229,7 +264,7 @@ test('codex config override wins over discovery entirely', async () => {
   const { fetchFn, calls } = fakeFetch(CODEX_MODELS_PAYLOAD)
   const adapter = codexAdapter({ session: codexSession, fetchFn, discovery: false })
   const models = await adapter.listModels('codex')
-  assert.deepEqual(models.map(model => model.id), ['gpt-5.1-codex'])
+  assert.deepEqual(models.map(model => model.id), ['gpt-5.6-terra'])
   assert.equal(calls(), 0)
 })
 
@@ -246,27 +281,29 @@ test('grok discovery maps the data array', async () => {
   assert.deepEqual(models.map(model => model.id), ['grok-4-1', 'grok-code-2'])
 })
 
-test('claude logged in returns the static catalog', async () => {
+test('claude serves only current models and only exposes officially supported efforts', async () => {
   const claude = claudeAdapter(claudeSession)
   const models = await claude.listModels('claude')
-  assert.deepEqual(models.map(model => model.id), ['claude-opus-4-5'])
-  const resolved = await claude.resolveModel('claude', 'claude-opus-4-5')
-  assert.deepEqual(resolved.reasoning?.efforts.map(effort => effort.id), ['low', 'medium', 'high', 'max'])
+  assert.deepEqual(models.map(model => model.id), ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'])
+  const resolved = await claude.resolveModel('claude', 'claude-opus-5')
+  assert.deepEqual(resolved.reasoning?.efforts.map(effort => effort.id), ['low', 'medium', 'high', 'xhigh', 'max'])
   assert.equal(resolved.reasoning?.defaultEffort, 'high')
+  assert.equal((await claude.resolveModel('claude', 'claude-haiku-4-5')).reasoning, undefined)
+  await assert.rejects(claude.resolveModel('claude', 'claude-opus-4-5'), /retired in this profile/)
 })
 
 test('fetchCodexModels tolerates entries without visibility or priority', async () => {
   const models = await fetchCodexModels(codexSession, fakeFetch({
-    models: [{ slug: 'bare', display_name: 'Bare' }],
+    models: [{ slug: 'gpt-5.6-luna', display_name: 'GPT-5.6 Luna' }],
   }).fetchFn)
-  assert.deepEqual(models, [{ id: 'bare', name: 'Bare' }])
+  assert.deepEqual(models, [{ id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' }])
 })
 
 test('modalities: codex and claude declare image input; grok gates text-only models', async () => {
   const codex = codexAdapter({ session: codexSession, discovery: false })
   const codexModels = await codex.listModels('codex')
   assert.deepEqual(codexModels[0].inputModalities, ['text', 'image'])
-  const codexResolved = await codex.resolveModel('codex', 'gpt-5.1-codex')
+  const codexResolved = await codex.resolveModel('codex', 'gpt-5.6-terra')
   assert.deepEqual(codexResolved.inputModalities, ['text', 'image'])
 
   const claude = claudeAdapter(claudeSession)
@@ -288,13 +325,13 @@ test('modalities: codex and claude declare image input; grok gates text-only mod
 
 test('modalities: config entry inputModalities win over the provider default', async () => {
   const adapter = new CodexAdapter({
-    models: [{ id: 'gpt-5.1-codex', inputModalities: ['text'] }],
+    models: [{ id: 'gpt-5.6-terra', inputModalities: ['text'] }],
     streamIdleTimeoutMs: 1000,
     tokens: memoryTokens(codexSession),
     discovery: false,
   })
   assert.deepEqual((await adapter.listModels('codex'))[0].inputModalities, ['text'])
-  assert.deepEqual((await adapter.resolveModel('codex', 'gpt-5.1-codex')).inputModalities, ['text'])
+  assert.deepEqual((await adapter.resolveModel('codex', 'gpt-5.6-terra')).inputModalities, ['text'])
 })
 
 test('grok discovery drops generation and embedding models', async () => {
@@ -438,7 +475,7 @@ test('empty discovery payload falls back to the static catalog with a warning', 
   const { fetchFn } = fakeFetch({ models: [] })
   const adapter = codexAdapter({ session: codexSession, fetchFn, warnings })
   const models = await adapter.listModels('codex')
-  assert.deepEqual(models.map(model => model.id), ['gpt-5.1-codex'])
+  assert.deepEqual(models.map(model => model.id), ['gpt-5.6-terra'])
   assert.equal(warnings.length, 1)
   assert.match(warnings[0], /empty catalog/)
 })

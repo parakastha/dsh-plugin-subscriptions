@@ -314,8 +314,29 @@ export interface ClaudeAdapterOptions {
   resolveAttachments?: () => AttachmentStore | undefined
 }
 
-/** The Claude 4.5 family accepts image input. */
+/** The current Claude subscription models accept image input. */
 const CLAUDE_MODALITIES: readonly ('text' | 'image')[] = ['text', 'image']
+
+const CLAUDE_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+
+/** Current Claude subscription families retained by this adapter. */
+export function isCurrentClaudeModel(model: string): boolean {
+  return model === 'claude-opus-5' || model === 'claude-sonnet-5' || model === 'claude-haiku-4-5'
+}
+
+function assertCurrentClaudeModel(model: string): void {
+  if (!isCurrentClaudeModel(model)) {
+    throw new LlmError(
+      `Claude model "${model}" is retired in this profile; select Claude Opus 5, Sonnet 5, or Haiku 4.5.`,
+      'UNSUPPORTED_MODEL',
+    )
+  }
+}
+
+/** Anthropic exposes effort only for the current Opus and Sonnet families. */
+function claudeReasoningEfforts(model: string): readonly string[] | undefined {
+  return model === 'claude-opus-5' || model === 'claude-sonnet-5' ? CLAUDE_REASONING_EFFORTS : undefined
+}
 
 /** Claude wire adapter: one instance serves the `claude` provider route. */
 export class ClaudeAdapter extends LlmAdapter {
@@ -341,7 +362,7 @@ export class ClaudeAdapter extends LlmAdapter {
     // Claude has no subscription model-list endpoint, so the static catalog
     // is the whole answer when logged in.
     if (!await this.options.tokens.hasSession()) return []
-    return this.options.models.map(model => ({
+    return this.options.models.filter(model => isCurrentClaudeModel(model.id)).map(model => ({
       provider,
       id: model.id,
       name: model.name ?? model.id,
@@ -350,8 +371,13 @@ export class ClaudeAdapter extends LlmAdapter {
   }
 
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    try {
+      assertCurrentClaudeModel(model)
+    } catch (error) {
+      return Promise.reject(error)
+    }
     const configured = this.options.models.find(entry => entry.id === model)
-    const efforts = configured?.reasoningEfforts?.map(effort => ({
+    const efforts = claudeReasoningEfforts(model)?.map(effort => ({
       id: ReasoningEffortId(effort),
       name: effort === 'xhigh' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1),
     }))
@@ -367,15 +393,14 @@ export class ClaudeAdapter extends LlmAdapter {
         : {
           reasoning: {
             efforts,
-            ...configured?.defaultReasoningEffort === undefined
-              ? {}
-              : { defaultEffort: ReasoningEffortId(configured.defaultReasoningEffort) },
+            defaultEffort: ReasoningEffortId('high'),
           },
         },
     })
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    assertCurrentClaudeModel(options.model)
     const watchdog = idleWatchdog(options.signal, this.options.streamIdleTimeoutMs)
     const release = await this.gate.acquire(options.signal)
     try {
