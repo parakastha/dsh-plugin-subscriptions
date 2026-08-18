@@ -509,6 +509,10 @@ export class ClaudeAdapter extends LlmAdapter {
       })
       await this.persistSessions()
     }
+    const discardState = async (): Promise<void> => {
+      if (sessionKey === undefined || !this.sessions.delete(sessionKey)) return
+      await this.persistSessions()
+    }
 
     try {
       const query = claudeAgentQuery({
@@ -581,11 +585,15 @@ export class ClaudeAdapter extends LlmAdapter {
         }
       }
       if (!emitted) throw new LlmError('Claude CLI returned no assistant content', EMPTY_RESPONSE_CODE)
-      await commitState()
+      // The Agent SDK resolves MCP calls internally. DSH instead executes the
+      // captured call and sends its result in the next request, so retaining
+      // this SDK session would hide that real result behind the placeholder.
+      if (capturedToolCall) await discardState()
+      else await commitState()
       yield { type: 'finish', reason: capturedToolCall ? { kind: 'tool-calls' } : { kind: 'stop' } }
     } catch (error) {
       if (capturedToolCall && controller.signal.aborted) {
-        await commitState()
+        await discardState()
         yield { type: 'finish', reason: { kind: 'tool-calls' } }
       } else {
         if (sessionKey !== undefined) {
@@ -627,7 +635,7 @@ export class ClaudeAdapter extends LlmAdapter {
   }
 
   private persistSessions(): Promise<void> {
-    const snapshot = JSON.stringify({ version: 1, sessions: Object.fromEntries(this.sessions) })
+    const snapshot = JSON.stringify({ version: 2, sessions: Object.fromEntries(this.sessions) })
     this.persistQueue = this.persistQueue.then(async () => {
       const target = this.options.sessionStatePath
       const temporary = `${target}.${process.pid}.tmp`
@@ -723,10 +731,10 @@ function isClaudeCliSessionState(value: unknown): value is ClaudeCliSessionState
     && Number.isFinite(state.lastUsedAt)
 }
 
-function isPersistedSessionFile(value: unknown): value is { version: 1; sessions: Record<string, unknown> } {
+function isPersistedSessionFile(value: unknown): value is { version: 2; sessions: Record<string, unknown> } {
   if (typeof value !== 'object' || value === null) return false
   const file = value as { version?: unknown; sessions?: unknown }
-  return file.version === 1 && typeof file.sessions === 'object' && file.sessions !== null && !Array.isArray(file.sessions)
+  return file.version === 2 && typeof file.sessions === 'object' && file.sessions !== null && !Array.isArray(file.sessions)
 }
 
 function jsonSchemaToZod(schema: Record<string, unknown>): Record<string, z.ZodTypeAny> {
