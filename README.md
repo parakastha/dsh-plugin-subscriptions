@@ -105,8 +105,6 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
   config:
     providers: [codex, claude]        # subset; default all three
     streamIdleTimeoutMs: 300000
-    codex:
-      speed: standard                  # standard | fast; Fast maps GPT-5.6 requests to service_tier: fast
     claude:
       maxConcurrentRequests: 1        # serialize Claude subscription calls
       maxStepsPerTurn: 8               # stop repeated tool loops
@@ -122,6 +120,8 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
       claude:
         - { id: claude-opus-5, name: Claude Opus 5, contextWindow: 1000000, inputModalities: [text, image], reasoningEfforts: [low, medium, high, xhigh, max], defaultReasoningEffort: high }
 ```
+
+GPT-5.6 models expose **Standard** and **Fast** in DSH's model picker. The choice is session-scoped; Fast maps only that session's requests to the Codex subscription `service_tier: fast` wire value.
 
 Claude requests use the Claude Agent SDK transport, keep one resumable Claude
 session per DSH session, and send only new user/tool-result messages after the

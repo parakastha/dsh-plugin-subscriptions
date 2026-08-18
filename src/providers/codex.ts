@@ -69,6 +69,7 @@ const CODEX_GPT_5_6_ULTRA_EFFORTS = [
   { id: ReasoningEffortId('ultra'), name: 'Ultra' },
 ] as const
 const CODEX_DEFAULT_EFFORT = ReasoningEffortId('high')
+const CODEX_FAST_TIER = 'fast'
 /** Every gpt-5.x codex model accepts image input. */
 const CODEX_MODALITIES: readonly ('text' | 'image')[] = ['text', 'image']
 
@@ -433,8 +434,6 @@ export interface CodexAdapterOptions {
   tokens: TokenManager<CodexSession>
   /** Whether to fetch the live catalog when logged in (false when config `models` overrides). */
   discovery: boolean
-  /** Subscription processing speed: standard pricing or the paid Fast tier. */
-  speed?: 'standard' | 'fast'
   /** Warning sink for discovery failures that fall back to the static catalog. */
   onWarn?: (message: string) => void
   /** Fetch implementation for discovery (defaults to global fetch). */
@@ -507,6 +506,15 @@ export class CodexAdapter extends LlmAdapter {
       ? this.catalog.latest()?.find(entry => entry.id === model)
       : undefined
     const configured = this.options.models.find(entry => entry.id === model)
+    const serviceTiers = supportsCodexFastMode(model)
+      ? {
+        tiers: [{
+          id: CODEX_FAST_TIER as never,
+          name: 'Fast',
+          description: 'Faster responses with higher subscription usage',
+        }],
+      }
+      : undefined
     return Promise.resolve({
       provider,
       id: model,
@@ -516,6 +524,7 @@ export class CodexAdapter extends LlmAdapter {
       context: { contextWindow: discovered?.contextWindow ?? configured?.contextWindow ?? CODEX_CONTEXT_WINDOW },
       defaultMaxTokens: configured?.maxTokens ?? CODEX_DEFAULT_MAX_TOKENS,
       reasoning: discovered?.reasoning ?? { efforts: fallbackCodexEfforts(model), defaultEffort: CODEX_DEFAULT_EFFORT },
+      ...serviceTiers === undefined ? {} : { serviceTiers },
     })
   }
 
@@ -543,6 +552,14 @@ export class CodexAdapter extends LlmAdapter {
   }
 
   private async request(options: GenerateOptions, session: CodexSession, signal: AbortSignal): Promise<Response> {
+    const serviceTier = (options as GenerateOptions & { serviceTier?: string }).serviceTier
+    if (serviceTier !== undefined
+      && (serviceTier !== CODEX_FAST_TIER || !supportsCodexFastMode(options.model))) {
+      throw new LlmError(
+        `Codex model "${options.model}" does not support service tier "${serviceTier}".`,
+        'UNSUPPORTED_SERVICE_TIER',
+      )
+    }
     const messages = await resolveImages(options.messages, this.options.resolveAttachments?.(), signal)
     const { instructions, input } = toResponsesInput(messages, options.system)
     const body = {
@@ -554,7 +571,7 @@ export class CodexAdapter extends LlmAdapter {
         : {},
       tool_choice: 'auto',
       parallel_tool_calls: true,
-      service_tier: this.options.speed === 'fast' && supportsCodexFastMode(options.model) ? 'fast' : 'default',
+      service_tier: serviceTier === CODEX_FAST_TIER ? 'fast' : 'default',
       ...options.reasoningEffort !== undefined
         ? { reasoning: { effort: String(options.reasoningEffort), summary: 'auto' } }
         : {},

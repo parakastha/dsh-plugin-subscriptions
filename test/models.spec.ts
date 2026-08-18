@@ -16,6 +16,10 @@ import { ClaudeAdapter } from '../src/providers/claude.js'
 import { TokenManager } from '../src/providers/common.js'
 import type { FetchFn } from '../src/providers/common.js'
 import type { ClaudeSession, CodexSession, GrokSession } from '../src/auth/store.js'
+import type { GenerateOptions, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+
+type ServiceTierModel = LlmResolvedModelInfo & { serviceTiers?: unknown }
+type ServiceTierOptions = GenerateOptions & { serviceTier?: string }
 
 const STATIC_CODEX = [{ id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' }]
 const STATIC_CLAUDE = [
@@ -206,7 +210,7 @@ test('codex rejects retired models before provider I/O', async () => {
   }, /retired in this profile/)
 })
 
-test('codex sends the selected official processing speed on the wire', async () => {
+test('codex exposes supported speeds and sends each selected tier on the wire', async () => {
   const requestBodies: Record<string, unknown>[] = []
   const requestFetch: FetchFn = async (_input, init) => {
     requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
@@ -217,18 +221,39 @@ test('codex sends the selected official processing speed on the wire', async () 
     streamIdleTimeoutMs: 1000,
     tokens: memoryTokens(codexSession),
     discovery: false,
-    speed: 'fast',
     fetchFn: requestFetch,
   })
-  for (const model of ['gpt-5.6-terra', 'gpt-5.3-codex-spark']) {
+  const fastModel = await adapter.resolveModel('codex', 'gpt-5.6-terra') as ServiceTierModel
+  assert.deepEqual(fastModel.serviceTiers, {
+    tiers: [{
+      id: 'fast',
+      name: 'Fast',
+      description: 'Faster responses with higher subscription usage',
+    }],
+  })
+  const sparkModel = await adapter.resolveModel('codex', 'gpt-5.3-codex-spark') as ServiceTierModel
+  assert.equal(sparkModel.serviceTiers, undefined)
+
+  for (const request of [
+    { model: 'gpt-5.6-terra', serviceTier: 'fast' },
+    { model: 'gpt-5.6-terra' },
+  ] satisfies { model: string; serviceTier?: string }[]) {
+    const options: ServiceTierOptions = { provider: 'codex', ...request, messages: [] }
     await assert.rejects(async () => {
-      for await (const _ of adapter.stream({ provider: 'codex', model, messages: [] })) {
+      for await (const _ of adapter.stream(options)) {
         void _
       }
     }, /codex API/)
   }
   assert.equal(requestBodies[0]?.service_tier, 'fast')
   assert.equal(requestBodies[1]?.service_tier, 'default')
+
+  await assert.rejects(async () => {
+    const options: ServiceTierOptions = {
+      provider: 'codex', model: 'gpt-5.3-codex-spark', serviceTier: 'fast', messages: [],
+    }
+    for await (const _ of adapter.stream(options)) void _
+  }, /does not support service tier/)
 })
 
 test('codex retains a listed model\'s efforts after the catalog refresh TTL', async () => {

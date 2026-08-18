@@ -95,11 +95,6 @@ export interface Config {
     claude?: ModelEntry[]
     grok?: ModelEntry[]
   }
-  /** Codex subscription request controls. */
-  codex?: {
-    /** Standard uses normal processing; Fast requests the paid low-latency tier. */
-    speed?: 'standard' | 'fast'
-  }
   /** Claude subscription safeguards and persistent CLI-session limits. */
   claude?: {
     maxConcurrentRequests?: number
@@ -131,9 +126,6 @@ export const Config: z<Config> = z.object({
     codex: z.array(modelEntrySchema),
     claude: z.array(modelEntrySchema),
     grok: z.array(modelEntrySchema),
-  }),
-  codex: z.object({
-    speed: z.union(['standard', 'fast']).default('standard'),
   }),
   claude: z.object({
     maxConcurrentRequests: z.number().step(1).min(1).default(DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS),
@@ -327,7 +319,6 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error(`${name}: streamIdleTimeoutMs must be a positive finite number`)
   }
   const catalog = resolveCatalog(config.models)
-  const codexConfig = { speed: config.codex?.speed ?? 'standard' as const }
   const claudeConfig = {
     maxConcurrentRequests: config.claude?.maxConcurrentRequests ?? DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS,
     maxStepsPerTurn: config.claude?.maxStepsPerTurn ?? DEFAULT_CLAUDE_MAX_STEPS_PER_TURN,
@@ -392,7 +383,6 @@ export function apply(ctx: Context, config: Config): void {
           streamIdleTimeoutMs,
           tokens,
           discovery: !overridden.has('codex'),
-          speed: codexConfig.speed,
           onWarn,
           resolveAttachments,
         })))
