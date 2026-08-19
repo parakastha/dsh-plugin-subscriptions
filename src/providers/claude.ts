@@ -26,7 +26,7 @@ import {
   query as claudeAgentQuery,
 } from '@anthropic-ai/claude-agent-sdk'
 import type { EffortLevel, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -66,6 +66,7 @@ export const CLAUDE_PREEMPT_MS = 5 * 60_000
 const CLAUDE_CLI_USER_AGENT = 'claude-cli/2.1.97 (external, cli)'
 const MCP_TOOL_PREFIX = 'mcp__dsh__'
 const BRIDGE_SYSTEM = 'You are operating inside DeepSeek Harness. Use only tools whose names start with "mcp__dsh__". Never use Claude Code built-in tools. DeepSeek Harness executes tool calls and returns their results.'
+const PSEUDO_TOOL_CALL_PREFIX = '[tool call: '
 
 /** Static claude flow facts for the OAuth flow engine. */
 export const claudeFlow: FlowSpec = {
@@ -449,6 +450,7 @@ export class ClaudeAdapter extends LlmAdapter {
     const delta = resolvedMessages.slice(deltaStart)
     const sendableDelta = delta.filter(message => message.role !== 'assistant')
     const resume = canResume && previous !== undefined && sendableDelta.length > 0
+
     const controller = new AbortController()
     const onAbort = (): void => { controller.abort() }
     if (options.signal?.aborted === true) controller.abort()
@@ -540,6 +542,20 @@ export class ClaudeAdapter extends LlmAdapter {
           }
           for (const block of message.message.content) {
             if (block.type === 'text' && block.text.length > 0) {
+              const pseudoCalls = parsePseudoToolCalls(block.text, tools)
+              if (pseudoCalls !== undefined) {
+                for (const call of pseudoCalls) {
+                  emitted = true
+                  capturedToolCall = true
+                  const id = CallId(`pseudo-${randomUUID()}`)
+                  yield { type: 'block-start', index, blockType: 'tool-call' }
+                  yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: call.arguments }
+                  yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: call.arguments } }
+                  index += 1
+                }
+                controller.abort()
+                break
+              }
               emitted = true
               yield { type: 'block-start', index, blockType: 'text' }
               yield { type: 'text-delta', index, text: block.text }
@@ -559,7 +575,7 @@ export class ClaudeAdapter extends LlmAdapter {
             }
           }
           if (capturedToolCall) toolResumeAt = String(message.uuid)
-          if (capturedToolCall && message.message.stop_reason === 'tool_use') break
+          if (capturedToolCall) break
         } else if (message.type === 'result') {
           if (message.subtype !== 'success') {
             throw claudeCliFailure(message.errors, message.subtype)
@@ -787,11 +803,67 @@ function messageContent(message: TranslatableMessage): Record<string, unknown>[]
     else if (block.type === 'image') {
       const image = sdkImage(block)
       if (image !== undefined) content.push(image)
-    } else if (block.type === 'tool-call') {
-      content.push({ type: 'text', text: `[tool call: ${block.name}(${block.arguments})]` })
     }
   }
   return content
+}
+
+interface PseudoToolCall {
+  name: string
+  arguments: string
+}
+
+/**
+ * Recover the exact text fallback Claude sometimes emits after seeing an old
+ * DSH transcript. Only complete bracketed calls for currently offered tools
+ * are accepted, so ordinary prose cannot become executable.
+ */
+export function parsePseudoToolCalls(
+  text: string,
+  tools: readonly { name: string }[],
+): PseudoToolCall[] | undefined {
+  const available = new Set(tools.map(tool => tool.name))
+  const calls: PseudoToolCall[] = []
+  let cursor = 0
+  while (cursor < text.length) {
+    while (/\s/.test(text[cursor] ?? '')) cursor += 1
+    if (!text.startsWith(PSEUDO_TOOL_CALL_PREFIX, cursor)) return undefined
+    cursor += PSEUDO_TOOL_CALL_PREFIX.length
+    const opening = text.indexOf('(', cursor)
+    if (opening < 0) return undefined
+    const name = text.slice(cursor, opening).trim()
+    if (!available.has(name)) return undefined
+    const argumentStart = opening + 1
+    let depth = 1
+    let string = false
+    let escaped = false
+    cursor = argumentStart
+    for (; cursor < text.length && depth > 0; cursor += 1) {
+      const character = text[cursor]
+      if (string) {
+        if (escaped) escaped = false
+        else if (character === '\\') escaped = true
+        else if (character === '"') string = false
+      } else if (character === '"') {
+        string = true
+      } else if (character === '(') {
+        depth += 1
+      } else if (character === ')') {
+        depth -= 1
+      }
+    }
+    if (depth !== 0 || text[cursor] !== ']') return undefined
+    const argumentsJson = text.slice(argumentStart, cursor - 1)
+    try {
+      const parsed = JSON.parse(argumentsJson) as unknown
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+    } catch {
+      return undefined
+    }
+    calls.push({ name, arguments: argumentsJson })
+    cursor += 1
+  }
+  return calls.length > 0 ? calls : undefined
 }
 
 /** Resume input carries only new user/tool-result messages; Claude retains prior turns. */

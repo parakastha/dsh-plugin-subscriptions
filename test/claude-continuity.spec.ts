@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { query as claudeAgentQuery } from '@anthropic-ai/claude-agent-sdk'
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
-import { ClaudeAdapter, claudeAssistantFailure } from '../src/providers/claude.js'
+import { ClaudeAdapter, claudeAssistantFailure, parsePseudoToolCalls } from '../src/providers/claude.js'
 import { TokenManager } from '../src/providers/common.js'
 import type { ClaudeSession } from '../src/auth/store.js'
 
@@ -111,6 +111,17 @@ test('Claude session-limit assistant errors become quota before text is emitted'
   )
   assert.equal(failure?.code, 'QUOTA')
   assert.equal(claudeAssistantFailure('rate_limit', 'request rate limited')?.code, 'RATE_LIMIT')
+})
+
+test('Claude pseudo tool-call recovery accepts only complete calls for offered tools', () => {
+  const tools = [{ name: 'inspect' }]
+  assert.deepEqual(
+    parsePseudoToolCalls('[tool call: inspect({"path":"a(b)"})]', tools),
+    [{ name: 'inspect', arguments: '{"path":"a(b)"}' }],
+  )
+  assert.equal(parsePseudoToolCalls('[tool call: missing({})]', tools), undefined)
+  assert.equal(parsePseudoToolCalls('please [tool call: inspect({})]', tools), undefined)
+  assert.equal(parsePseudoToolCalls('[tool call: inspect({broken})]', tools), undefined)
 })
 
 test('Claude bridge surfaces the live session-limit message as quota', async () => {

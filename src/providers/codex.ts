@@ -64,10 +64,6 @@ const CODEX_GPT_5_6_EFFORTS = [
   ...CODEX_EFFORTS,
   { id: ReasoningEffortId('max'), name: 'Max' },
 ] as const
-const CODEX_GPT_5_6_ULTRA_EFFORTS = [
-  ...CODEX_GPT_5_6_EFFORTS,
-  { id: ReasoningEffortId('ultra'), name: 'Ultra' },
-] as const
 const CODEX_DEFAULT_EFFORT = ReasoningEffortId('high')
 /** Codex displays this service tier as Fast; the API wire value is `priority`. */
 const CODEX_FAST_TIER = 'priority'
@@ -98,8 +94,7 @@ function assertCurrentCodexModel(model: string): void {
 
 /** Fallback effort metadata for a selected Codex model before live discovery completes. */
 function fallbackCodexEfforts(model: string): readonly LlmReasoningEffortInfo[] {
-  if (model === 'gpt-5.6-sol' || model === 'gpt-5.6-terra') return CODEX_GPT_5_6_ULTRA_EFFORTS
-  if (model === 'gpt-5.6-luna') return CODEX_GPT_5_6_EFFORTS
+  if (model.startsWith('gpt-5.6-')) return CODEX_GPT_5_6_EFFORTS
   return CODEX_EFFORTS
 }
 
@@ -390,7 +385,11 @@ export async function fetchCodexModels(session: CodexSession, fetchFn: FetchFn =
     if (entry.visibility === 'hide' || entry.visibility === 'none') continue
     if (!isCurrentCodexModel(entry.slug)) continue
     const efforts = (entry.supported_reasoning_levels ?? [])
-      .filter(level => typeof level.effort === 'string' && level.effort.length > 0)
+      // Codex catalogs Ultra beside efforts, but Ultra is client-side
+      // multi-agent orchestration—not a Responses API reasoning effort.
+      .filter(level => typeof level.effort === 'string'
+        && level.effort.length > 0
+        && level.effort !== 'ultra')
       .map(level => ({
         id: ReasoningEffortId(level.effort as string),
         name: effortName(level.effort as string),
@@ -559,6 +558,12 @@ export class CodexAdapter extends LlmAdapter {
       throw new LlmError(
         `Codex model "${options.model}" does not support service tier "${serviceTier}".`,
         'UNSUPPORTED_SERVICE_TIER',
+      )
+    }
+    if (String(options.reasoningEffort) === 'ultra') {
+      throw new LlmError(
+        'Codex Ultra is a multi-agent mode, not a reasoning effort; select Max for this provider.',
+        'UNSUPPORTED_REASONING_EFFORT',
       )
     }
     const messages = await resolveImages(options.messages, this.options.resolveAttachments?.(), signal)

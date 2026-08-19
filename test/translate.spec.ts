@@ -75,6 +75,30 @@ test('toResponsesInput: text, tool call, and tool result round trip', () => {
   ])
 })
 
+test('toResponsesInput: omits an orphaned tool result', () => {
+  const { input } = toResponsesInput([
+    message('user', [toolResult('toolu_orphan', 'stale tool output')], {
+      kind: 'tool', callId: CallId('toolu_orphan'),
+    }),
+    message('user', [{ type: 'text', text: 'continue' }]),
+  ])
+
+  assert.deepEqual(input, [
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue' }] },
+  ])
+})
+
+test('toResponsesInput: omits an orphaned tool call', () => {
+  const { input } = toResponsesInput([
+    message('assistant', [toolCall('toolu_orphan', 'bash', '{"cmd":"dir"}')]),
+    message('user', [{ type: 'text', text: 'continue' }]),
+  ])
+
+  assert.deepEqual(input, [
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue' }] },
+  ])
+})
+
 test('toResponsesInput: system-role messages become instructions unless options.system wins', () => {
   const systemMessage = message('system', [{ type: 'text', text: 'from history' }])
   const fromMessages = toResponsesInput([systemMessage])

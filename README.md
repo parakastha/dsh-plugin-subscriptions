@@ -118,6 +118,7 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
 ```
 
 GPT-5.6 models expose **Standard** and **Fast** in DSH's model picker. The choice is session-scoped; Fast maps only that session's requests to the Codex subscription `service_tier: priority` wire value.
+Codex **Ultra** is multi-agent orchestration rather than a Responses API reasoning effort, so this provider exposes raw reasoning efforts only through **Max**.
 
 Claude requests use the Claude Agent SDK transport, keep one resumable Claude
 session per DSH session, and send only new user/tool-result messages after the

@@ -50,6 +50,13 @@ function toolResultText(block: ToolResultBlock): string {
 export function toResponsesInput(messages: readonly TranslatableMessage[], system?: string): ResponsesRequestInput {
   const input: Record<string, unknown>[] = []
   const systemTexts: string[] = []
+  // Responses requires complete function-call pairs. A resumed cross-provider
+  // transcript can retain only one side after an interrupted tool turn, so
+  // omit incomplete history rather than making the entire next request invalid.
+  const resultToolCallIds = new Set(messages.flatMap(message => message.content
+    .filter(block => block.type === 'tool-result')
+    .map(block => String(block.toolCallId))))
+  const emittedToolCallIds = new Set<string>()
   for (const message of messages) {
     if (message.role === 'system') {
       for (const block of message.content) {
@@ -70,7 +77,9 @@ export function toResponsesInput(messages: readonly TranslatableMessage[], syste
           content.push({ type: role === 'assistant' ? 'output_text' : 'input_text', text: block.text })
           break
         case 'tool-call':
+          if (!resultToolCallIds.has(String(block.id))) break
           flushMessage()
+          emittedToolCallIds.add(String(block.id))
           input.push({
             type: 'function_call',
             call_id: String(block.id),
@@ -80,6 +89,7 @@ export function toResponsesInput(messages: readonly TranslatableMessage[], syste
           break
         case 'tool-result':
           flushMessage()
+          if (!emittedToolCallIds.has(String(block.toolCallId))) break
           input.push({
             type: 'function_call_output',
             call_id: String(block.toolCallId),

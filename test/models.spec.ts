@@ -104,7 +104,11 @@ function codexAdapter(overrides: {
   })
 }
 
-function claudeAdapter(session: ClaudeSession | undefined, models = STATIC_CLAUDE): ClaudeAdapter {
+function claudeAdapter(
+  session: ClaudeSession | undefined,
+  models = STATIC_CLAUDE,
+  overrides: Partial<ConstructorParameters<typeof ClaudeAdapter>[0]> = {},
+): ClaudeAdapter {
   return new ClaudeAdapter({
     models,
     streamIdleTimeoutMs: 1000,
@@ -114,6 +118,7 @@ function claudeAdapter(session: ClaudeSession | undefined, models = STATIC_CLAUD
     sessionStateTtlMs: 60_000,
     sessionStatePath: join(tmpdir(), `dsh-plugin-subscriptions-models-${randomUUID()}.json`),
     cliMaxTurns: 1,
+    ...overrides,
   })
 }
 
@@ -181,7 +186,7 @@ test('resolveModel prefers discovered context window and reasoning efforts', asy
   assert.equal(resolved.context?.contextWindow, 500_000)
   assert.deepEqual(
     resolved.reasoning?.efforts.map(effort => effort.id),
-    ['low', 'high', 'max', 'ultra'],
+    ['low', 'high', 'max'],
   )
   assert.equal(resolved.reasoning?.defaultEffort, 'high')
   // A current model that the catalog did not advertise falls back to static defaults.
@@ -190,16 +195,30 @@ test('resolveModel prefers discovered context window and reasoning efforts', asy
   assert.deepEqual(fallback.reasoning?.efforts.map(effort => effort.id), ['low', 'medium', 'high', 'xhigh'])
 })
 
-test('codex gpt-5.6 fallback exposes the documented max level and live ultra variants', async () => {
+test('codex gpt-5.6 fallback exposes API reasoning efforts through max', async () => {
   const adapter = codexAdapter({ session: codexSession, discovery: false })
   assert.deepEqual(
     (await adapter.resolveModel('codex', 'gpt-5.6-terra')).reasoning?.efforts.map(effort => effort.id),
-    ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    ['low', 'medium', 'high', 'xhigh', 'max'],
   )
   assert.deepEqual(
     (await adapter.resolveModel('codex', 'gpt-5.6-luna')).reasoning?.efforts.map(effort => effort.id),
     ['low', 'medium', 'high', 'xhigh', 'max'],
   )
+})
+
+test('codex rejects Ultra before sending a model request', async () => {
+  const { fetchFn, calls } = fakeFetch({})
+  const adapter = codexAdapter({ session: codexSession, discovery: false, fetchFn })
+  await assert.rejects(async () => {
+    for await (const _ of adapter.stream({
+      provider: 'codex',
+      model: 'gpt-5.6-terra',
+      messages: [],
+      reasoningEffort: 'ultra' as never,
+    })) void _
+  }, /Codex Ultra is a multi-agent mode/)
+  assert.equal(calls(), 0)
 })
 
 test('codex rejects retired models before provider I/O', async () => {
@@ -270,7 +289,7 @@ test('codex retains a listed model\'s efforts after the catalog refresh TTL', as
     const resolved = await adapter.resolveModel('codex', 'gpt-5.6-terra')
     assert.deepEqual(
       resolved.reasoning?.efforts.map(effort => effort.id),
-      ['low', 'high', 'max', 'ultra'],
+      ['low', 'high', 'max'],
     )
   } finally {
     Date.now = actualNow
