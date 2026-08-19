@@ -303,7 +303,6 @@ export interface ClaudeAdapterOptions {
   tokens: TokenManager<ClaudeSession>
   onWarn: (message: string) => void
   maxConcurrentRequests: number
-  maxStepsPerTurn: number
   usageWarnPercent: number
   usageBlockPercent: number
   usageCacheTtlMs: number
@@ -486,19 +485,6 @@ export class ClaudeAdapter extends LlmAdapter {
     const delta = resolvedMessages.slice(deltaStart)
     const sendableDelta = delta.filter(message => message.role !== 'assistant')
     const resume = canResume && previous !== undefined && sendableDelta.length > 0
-    const startsUserTurn = sendableDelta.some(message => message.content.some(block => block.type !== 'tool-result'))
-    const stepsThisTurn = resume && !startsUserTurn ? previous.stepsThisTurn + 1 : 1
-    if (stepsThisTurn > this.options.maxStepsPerTurn) {
-      if (sessionKey !== undefined) {
-        this.sessions.delete(sessionKey)
-        await this.persistSessions()
-      }
-      throw new LlmError(
-        `Claude step guard stopped this turn after ${this.options.maxStepsPerTurn} model calls. Start a new turn after checking the repeated tool loop.`,
-        'STEP_GUARD',
-      )
-    }
-
     const controller = new AbortController()
     const onAbort = (): void => { controller.abort() }
     if (options.signal?.aborted === true) controller.abort()
@@ -538,7 +524,6 @@ export class ClaudeAdapter extends LlmAdapter {
         ...options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort },
         systemSignature,
         toolsSignature,
-        stepsThisTurn,
         lastUsedAt: Date.now(),
       })
       await this.persistSessions()
@@ -691,7 +676,6 @@ interface ClaudeCliSessionState {
   reasoningEffort?: string
   systemSignature: string
   toolsSignature: string
-  stepsThisTurn: number
   lastUsedAt: number
 }
 
@@ -758,9 +742,6 @@ function isClaudeCliSessionState(value: unknown): value is ClaudeCliSessionState
     && (state.reasoningEffort === undefined || typeof state.reasoningEffort === 'string')
     && typeof state.systemSignature === 'string'
     && typeof state.toolsSignature === 'string'
-    && typeof state.stepsThisTurn === 'number'
-    && Number.isSafeInteger(state.stepsThisTurn)
-    && state.stepsThisTurn >= 0
     && typeof state.lastUsedAt === 'number'
     && Number.isFinite(state.lastUsedAt)
 }

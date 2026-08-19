@@ -75,7 +75,6 @@ export const inject = ['llm']
 /** Default maximum provider idle time while one stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 export const DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS = 1
-export const DEFAULT_CLAUDE_MAX_STEPS_PER_TURN = 8
 export const DEFAULT_CLAUDE_USAGE_WARN_PERCENT = 70
 export const DEFAULT_CLAUDE_USAGE_BLOCK_PERCENT = 85
 export const DEFAULT_CLAUDE_USAGE_CACHE_TTL_MS = 5_000
@@ -98,7 +97,6 @@ export interface Config {
   /** Claude subscription safeguards and persistent CLI-session limits. */
   claude?: {
     maxConcurrentRequests?: number
-    maxStepsPerTurn?: number
     usageWarnPercent?: number
     usageBlockPercent?: number
     usageCacheTtlMs?: number
@@ -129,7 +127,6 @@ export const Config: z<Config> = z.object({
   }),
   claude: z.object({
     maxConcurrentRequests: z.number().step(1).min(1).default(DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS),
-    maxStepsPerTurn: z.number().step(1).min(1).default(DEFAULT_CLAUDE_MAX_STEPS_PER_TURN),
     usageWarnPercent: z.number().min(0).max(100).default(DEFAULT_CLAUDE_USAGE_WARN_PERCENT),
     usageBlockPercent: z.number().min(0).max(100).default(DEFAULT_CLAUDE_USAGE_BLOCK_PERCENT),
     usageCacheTtlMs: z.number().step(1).min(1).default(DEFAULT_CLAUDE_USAGE_CACHE_TTL_MS),
@@ -325,7 +322,6 @@ export function apply(ctx: Context, config: Config): void {
   const catalog = resolveCatalog(config.models)
   const claudeConfig = {
     maxConcurrentRequests: config.claude?.maxConcurrentRequests ?? DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS,
-    maxStepsPerTurn: config.claude?.maxStepsPerTurn ?? DEFAULT_CLAUDE_MAX_STEPS_PER_TURN,
     usageWarnPercent: config.claude?.usageWarnPercent ?? DEFAULT_CLAUDE_USAGE_WARN_PERCENT,
     usageBlockPercent: config.claude?.usageBlockPercent ?? DEFAULT_CLAUDE_USAGE_BLOCK_PERCENT,
     usageCacheTtlMs: config.claude?.usageCacheTtlMs ?? DEFAULT_CLAUDE_USAGE_CACHE_TTL_MS,

@@ -14,7 +14,6 @@
     providers: [codex, claude]
     claude:
       maxConcurrentRequests: 1
-      maxStepsPerTurn: 8
       usageWarnPercent: 70
       usageBlockPercent: 85
       usageCacheTtlMs: 5000

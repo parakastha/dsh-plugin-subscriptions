@@ -107,7 +107,6 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
     streamIdleTimeoutMs: 300000
     claude:
       maxConcurrentRequests: 1        # serialize Claude subscription calls
-      maxStepsPerTurn: 8               # stop repeated tool loops
       usageWarnPercent: 70
       usageBlockPercent: 85            # reject before sending at/above this limit
       usageCacheTtlMs: 5000

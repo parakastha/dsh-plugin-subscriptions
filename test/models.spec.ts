@@ -106,7 +106,6 @@ function claudeAdapter(session: ClaudeSession | undefined, models = STATIC_CLAUD
     tokens: memoryTokens(session),
     onWarn: () => {},
     maxConcurrentRequests: 1,
-    maxStepsPerTurn: 8,
     usageWarnPercent: 70,
     usageBlockPercent: 85,
     usageCacheTtlMs: 5000,
