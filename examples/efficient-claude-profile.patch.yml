@@ -14,9 +14,6 @@
     providers: [codex, claude]
     claude:
       maxConcurrentRequests: 1
-      usageWarnPercent: 70
-      usageBlockPercent: 85
-      usageCacheTtlMs: 5000
       sessionStateTtlMs: 21600000
       cliMaxTurns: 1
     models:

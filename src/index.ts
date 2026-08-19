@@ -75,9 +75,6 @@ export const inject = ['llm']
 /** Default maximum provider idle time while one stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 export const DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS = 1
-export const DEFAULT_CLAUDE_USAGE_WARN_PERCENT = 70
-export const DEFAULT_CLAUDE_USAGE_BLOCK_PERCENT = 85
-export const DEFAULT_CLAUDE_USAGE_CACHE_TTL_MS = 5_000
 export const DEFAULT_CLAUDE_SESSION_STATE_TTL_MS = 6 * 60 * 60_000
 export const DEFAULT_CLAUDE_SESSION_STATE_PATH = dshHomePath('plugins', 'subscriptions', 'claude-sessions.json')
 export const DEFAULT_CLAUDE_CLI_MAX_TURNS = 1
@@ -94,12 +91,9 @@ export interface Config {
     claude?: ModelEntry[]
     grok?: ModelEntry[]
   }
-  /** Claude subscription safeguards and persistent CLI-session limits. */
+  /** Claude concurrency and persistent CLI-session limits. */
   claude?: {
     maxConcurrentRequests?: number
-    usageWarnPercent?: number
-    usageBlockPercent?: number
-    usageCacheTtlMs?: number
     sessionStateTtlMs?: number
     sessionStatePath?: string
     cliMaxTurns?: number
@@ -127,9 +121,6 @@ export const Config: z<Config> = z.object({
   }),
   claude: z.object({
     maxConcurrentRequests: z.number().step(1).min(1).default(DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS),
-    usageWarnPercent: z.number().min(0).max(100).default(DEFAULT_CLAUDE_USAGE_WARN_PERCENT),
-    usageBlockPercent: z.number().min(0).max(100).default(DEFAULT_CLAUDE_USAGE_BLOCK_PERCENT),
-    usageCacheTtlMs: z.number().step(1).min(1).default(DEFAULT_CLAUDE_USAGE_CACHE_TTL_MS),
     sessionStateTtlMs: z.number().step(1).min(1).default(DEFAULT_CLAUDE_SESSION_STATE_TTL_MS),
     sessionStatePath: z.string().default(DEFAULT_CLAUDE_SESSION_STATE_PATH),
     cliMaxTurns: z.number().step(1).min(1).default(DEFAULT_CLAUDE_CLI_MAX_TURNS),
@@ -322,15 +313,9 @@ export function apply(ctx: Context, config: Config): void {
   const catalog = resolveCatalog(config.models)
   const claudeConfig = {
     maxConcurrentRequests: config.claude?.maxConcurrentRequests ?? DEFAULT_CLAUDE_MAX_CONCURRENT_REQUESTS,
-    usageWarnPercent: config.claude?.usageWarnPercent ?? DEFAULT_CLAUDE_USAGE_WARN_PERCENT,
-    usageBlockPercent: config.claude?.usageBlockPercent ?? DEFAULT_CLAUDE_USAGE_BLOCK_PERCENT,
-    usageCacheTtlMs: config.claude?.usageCacheTtlMs ?? DEFAULT_CLAUDE_USAGE_CACHE_TTL_MS,
     sessionStateTtlMs: config.claude?.sessionStateTtlMs ?? DEFAULT_CLAUDE_SESSION_STATE_TTL_MS,
     sessionStatePath: config.claude?.sessionStatePath?.trim() || DEFAULT_CLAUDE_SESSION_STATE_PATH,
     cliMaxTurns: config.claude?.cliMaxTurns ?? DEFAULT_CLAUDE_CLI_MAX_TURNS,
-  }
-  if (claudeConfig.usageWarnPercent >= claudeConfig.usageBlockPercent) {
-    throw new Error(`${name}: claude.usageWarnPercent must be lower than claude.usageBlockPercent`)
   }
   // A non-empty configured catalog is an explicit override: it wins over live
   // discovery entirely (schemastery injects [] for omitted arrays, so only a

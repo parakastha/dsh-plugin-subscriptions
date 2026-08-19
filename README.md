@@ -107,9 +107,6 @@ Not logged in? The provider stays out of the picker, and requests fail with `MIS
     streamIdleTimeoutMs: 300000
     claude:
       maxConcurrentRequests: 1        # serialize Claude subscription calls
-      usageWarnPercent: 70
-      usageBlockPercent: 85            # reject before sending at/above this limit
-      usageCacheTtlMs: 5000
       sessionStateTtlMs: 21600000      # keep DSH -> Claude resume mappings for 6h
       # sessionStatePath defaults to ~/.dsh/plugins/subscriptions/claude-sessions.json
       cliMaxTurns: 1                    # no hidden second Claude turn
@@ -128,8 +125,9 @@ first request. Resume mappings survive DSH restarts; the state file contains
 only Claude session ids, message counts, and SHA-256 fingerprints—not prompts,
 tool definitions, or tokens. The adapter disables Claude Code's built-in tools,
 skills, plugins, agents, MCP settings, and filesystem settings so DSH remains
-the sole tool and instruction layer. Usage lookup fails closed: if remaining
-quota cannot be verified, no model request is sent.
+the sole tool and instruction layer. Model requests are never stopped by a
+preemptive usage threshold; the provider's actual exhausted-quota response is
+reported as `QUOTA` so a host router can move to another provider.
 
 For a Claude-only profile, copy `examples/efficient-claude` into the profile's
 `.agent-presets/efficient-claude` directory. It keeps one model lane, caps the

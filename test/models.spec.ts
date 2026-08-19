@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CodexAdapter, fetchCodexModels } from '../src/providers/codex.js'
 import { GrokAdapter } from '../src/providers/grok.js'
-import { ClaudeAdapter } from '../src/providers/claude.js'
+import { ClaudeAdapter, claudeCliFailure } from '../src/providers/claude.js'
 import { TokenManager } from '../src/providers/common.js'
 import type { FetchFn } from '../src/providers/common.js'
 import type { ClaudeSession, CodexSession, GrokSession } from '../src/auth/store.js'
@@ -29,6 +29,11 @@ const STATIC_CLAUDE = [
   { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
 ]
 const STATIC_GROK = [{ id: 'grok-4', name: 'Grok 4' }]
+
+test('Claude reports only actual subscription exhaustion as quota', () => {
+  assert.equal(claudeCliFailure(['You have reached your usage limit'], 'error_during_execution').code, 'QUOTA')
+  assert.equal(claudeCliFailure(['request rate limited'], 'error_during_execution').code, 'EMPTY_RESPONSE')
+})
 
 const codexSession: CodexSession = {
   accessToken: 'at',
@@ -106,9 +111,6 @@ function claudeAdapter(session: ClaudeSession | undefined, models = STATIC_CLAUD
     tokens: memoryTokens(session),
     onWarn: () => {},
     maxConcurrentRequests: 1,
-    usageWarnPercent: 70,
-    usageBlockPercent: 85,
-    usageCacheTtlMs: 5000,
     sessionStateTtlMs: 60_000,
     sessionStatePath: join(tmpdir(), `dsh-plugin-subscriptions-models-${randomUUID()}.json`),
     cliMaxTurns: 1,

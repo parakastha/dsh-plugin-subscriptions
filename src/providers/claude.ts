@@ -4,7 +4,15 @@
  * the Claude Agent SDK so one native Claude session can survive many DSH turns.
  */
 
-import { CallId, EMPTY_RESPONSE_CODE, LlmAdapter, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import {
+  CallId,
+  EMPTY_RESPONSE_CODE,
+  isQuotaExceededError,
+  LlmAdapter,
+  LlmError,
+  QUOTA_EXCEEDED_CODE,
+  ReasoningEffortId,
+} from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
   LlmModelInfo,
@@ -303,9 +311,6 @@ export interface ClaudeAdapterOptions {
   tokens: TokenManager<ClaudeSession>
   onWarn: (message: string) => void
   maxConcurrentRequests: number
-  usageWarnPercent: number
-  usageBlockPercent: number
-  usageCacheTtlMs: number
   sessionStateTtlMs: number
   sessionStatePath: string
   cliMaxTurns: number
@@ -352,8 +357,6 @@ export class ClaudeAdapter extends LlmAdapter {
   private readonly sessions = new Map<string, ClaudeCliSessionState>()
   private readonly sessionsLoaded: Promise<void>
   private persistQueue = Promise.resolve()
-  private usageCache?: { fetchedAt: number; value: ProviderUsage }
-  private readonly warnedWindows = new Set<string>()
 
   constructor(private readonly options: ClaudeAdapterOptions) {
     super()
@@ -412,7 +415,7 @@ export class ClaudeAdapter extends LlmAdapter {
     const watchdog = idleWatchdog(options.signal, this.options.streamIdleTimeoutMs)
     const release = await this.gate.acquire(options.signal)
     try {
-      const session = await this.guardUsage(watchdog.signal)
+      const session = await this.options.tokens.session()
       yield* this.streamViaCli(options, session, watchdog)
     } catch (error: unknown) {
       throw mapFetchFailure('claude CLI bridge', error, watchdog, options.signal)
@@ -420,46 +423,6 @@ export class ClaudeAdapter extends LlmAdapter {
       release()
       watchdog.stop()
     }
-  }
-
-  /** Reject requests before they consume quota when an active usage window is too full. */
-  private async guardUsage(signal: AbortSignal): Promise<ClaudeSession> {
-    const now = Date.now()
-    const session = await this.options.tokens.session()
-    let usage = this.usageCache?.value
-    if (usage === undefined || now - (this.usageCache?.fetchedAt ?? 0) >= this.options.usageCacheTtlMs) {
-      try {
-        usage = await fetchClaudeUsage(session, fetch, signal)
-        this.usageCache = { fetchedAt: now, value: usage }
-      } catch (error) {
-        throw new LlmError(
-          `Claude usage guard could not verify remaining quota; request was not sent: ${error instanceof Error ? error.message : String(error)}`,
-          'USAGE_GUARD_UNAVAILABLE',
-        )
-      }
-    }
-    if (usage.windows === undefined || usage.windows.length === 0) {
-      throw new LlmError(
-        'Claude usage guard received no quota windows; request was not sent.',
-        'USAGE_GUARD_UNAVAILABLE',
-      )
-    }
-    const active = usage.windows?.filter(window => window.resetsAt === undefined || window.resetsAt > now) ?? []
-    const blocking = active.find(window => window.usedPercent >= this.options.usageBlockPercent)
-    if (blocking !== undefined) {
-      const reset = blocking.resetsAt === undefined ? 'an unspecified reset time' : new Date(blocking.resetsAt).toLocaleString()
-      throw new LlmError(
-        `Claude usage guard stopped this request at ${blocking.usedPercent}% ${windowLabel(blocking)} usage; it resets at ${reset}. No model request was sent.`,
-        'QUOTA_GUARD',
-      )
-    }
-    for (const window of active.filter(item => item.usedPercent >= this.options.usageWarnPercent)) {
-      const key = `${window.kind}:${window.scope ?? ''}:${window.resetsAt ?? ''}`
-      if (this.warnedWindows.has(key)) continue
-      this.warnedWindows.add(key)
-      this.options.onWarn(`Claude ${windowLabel(window)} usage is ${window.usedPercent}%; new requests stop at ${this.options.usageBlockPercent}%.`)
-    }
-    return session
   }
 
   /** Stream one DSH step through a persistent Claude Agent SDK session. */
@@ -595,7 +558,7 @@ export class ClaudeAdapter extends LlmAdapter {
           if (capturedToolCall && message.message.stop_reason === 'tool_use') break
         } else if (message.type === 'result') {
           if (message.subtype !== 'success') {
-            throw new LlmError(`Claude CLI error: ${message.errors.join('; ') || message.subtype}`, EMPTY_RESPONSE_CODE)
+            throw claudeCliFailure(message.errors, message.subtype)
           }
           if (!usageEmitted) {
             const usage = toTokenUsage(message.usage)
@@ -618,6 +581,10 @@ export class ClaudeAdapter extends LlmAdapter {
         if (sessionKey !== undefined) {
           this.sessions.delete(sessionKey)
           await this.persistSessions()
+        }
+        const detail = error instanceof Error ? error.message : String(error)
+        if (!(error instanceof LlmError) && isClaudeQuotaExhaustion(detail)) {
+          throw new LlmError(`Claude CLI error: ${detail}`, QUOTA_EXCEEDED_CODE, { cause: error })
         }
         throw error
       }
@@ -722,8 +689,18 @@ class RequestGate {
   }
 }
 
-function windowLabel(window: UsageWindow): string {
-  return `${window.kind}${window.scope === undefined ? '' : ` ${window.scope}`}`
+function isClaudeQuotaExhaustion(detail: string): boolean {
+  return isQuotaExceededError(detail)
+    || /\b(?:hit|reached)\s+(?:your|the)\s+(?:claude\s+)?(?:usage\s+)?limit\b/i.test(detail)
+}
+
+/** Map one terminal Claude SDK result without treating transient rate limiting as exhausted quota. */
+export function claudeCliFailure(errors: readonly string[], subtype: string): LlmError {
+  const detail = errors.join('; ') || subtype
+  return new LlmError(
+    `Claude CLI error: ${detail}`,
+    isClaudeQuotaExhaustion(`${subtype} ${detail}`) ? QUOTA_EXCEEDED_CODE : EMPTY_RESPONSE_CODE,
+  )
 }
 
 function signature(value: string): string {
