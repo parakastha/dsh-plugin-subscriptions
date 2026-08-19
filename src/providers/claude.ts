@@ -314,6 +314,7 @@ export interface ClaudeAdapterOptions {
   sessionStateTtlMs: number
   sessionStatePath: string
   cliMaxTurns: number
+  claudeQuery?: typeof claudeAgentQuery
   /** Resolve the attachment service per request; absent means image requests fail loudly. */
   resolveAttachments?: () => AttachmentStore | undefined
 }
@@ -477,7 +478,7 @@ export class ClaudeAdapter extends LlmAdapter {
     let capturedToolCall = false
     let emitted = false
     let usageEmitted = false
-    const commitState = async (): Promise<void> => {
+    const commitState = async (resumeSessionAt?: string): Promise<void> => {
       if (sessionKey === undefined || claudeSessionId === undefined) return
       this.sessions.set(sessionKey, {
         claudeSessionId,
@@ -487,17 +488,14 @@ export class ClaudeAdapter extends LlmAdapter {
         ...options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort },
         systemSignature,
         toolsSignature,
+        ...resumeSessionAt === undefined ? {} : { resumeSessionAt },
         lastUsedAt: Date.now(),
       })
       await this.persistSessions()
     }
-    const discardState = async (): Promise<void> => {
-      if (sessionKey === undefined || !this.sessions.delete(sessionKey)) return
-      await this.persistSessions()
-    }
-
+    let toolResumeAt: string | undefined
     try {
-      const query = claudeAgentQuery({
+      const query = (this.options.claudeQuery ?? claudeAgentQuery)({
         prompt: resume ? sdkUserMessages(sendableDelta) : sdkInitialPrompt(resolvedMessages),
         options: {
           model: options.model,
@@ -507,6 +505,9 @@ export class ClaudeAdapter extends LlmAdapter {
           cwd: tmpdir(),
           maxTurns: this.options.cliMaxTurns,
           ...resume && claudeSessionId !== undefined ? { resume: claudeSessionId } : {},
+          ...resume && previous?.resumeSessionAt !== undefined
+            ? { resumeSessionAt: previous.resumeSessionAt }
+            : {},
           systemPrompt: [options.system, BRIDGE_SYSTEM].filter(Boolean).join('\n\n'),
           mcpServers,
           strictMcpConfig: true,
@@ -530,6 +531,8 @@ export class ClaudeAdapter extends LlmAdapter {
         watchdog.pulse()
         if ('session_id' in message && typeof message.session_id === 'string') claudeSessionId = message.session_id
         if (message.type === 'assistant') {
+          const failure = claudeAssistantFailure(message.error, assistantText(message.message.content))
+          if (failure !== undefined) throw failure
           const usage = toTokenUsage(message.message.usage)
           if (usage !== undefined) {
             usageEmitted = true
@@ -555,6 +558,7 @@ export class ClaudeAdapter extends LlmAdapter {
               controller.abort()
             }
           }
+          if (capturedToolCall) toolResumeAt = String(message.uuid)
           if (capturedToolCall && message.message.stop_reason === 'tool_use') break
         } else if (message.type === 'result') {
           if (message.subtype !== 'success') {
@@ -567,15 +571,14 @@ export class ClaudeAdapter extends LlmAdapter {
         }
       }
       if (!emitted) throw new LlmError('Claude CLI returned no assistant content', EMPTY_RESPONSE_CODE)
-      // The Agent SDK resolves MCP calls internally. DSH instead executes the
-      // captured call and sends its result in the next request, so retaining
-      // this SDK session would hide that real result behind the placeholder.
-      if (capturedToolCall) await discardState()
-      else await commitState()
+      // Keep the assistant tool_use, but rewind past the SDK placeholder on
+      // the next request so DSH can append the real tool result without
+      // replaying the complete conversation.
+      await commitState(capturedToolCall ? toolResumeAt : undefined)
       yield { type: 'finish', reason: capturedToolCall ? { kind: 'tool-calls' } : { kind: 'stop' } }
     } catch (error) {
       if (capturedToolCall && controller.signal.aborted) {
-        await discardState()
+        await commitState(toolResumeAt)
         yield { type: 'finish', reason: { kind: 'tool-calls' } }
       } else {
         if (sessionKey !== undefined) {
@@ -621,7 +624,7 @@ export class ClaudeAdapter extends LlmAdapter {
   }
 
   private persistSessions(): Promise<void> {
-    const snapshot = JSON.stringify({ version: 2, sessions: Object.fromEntries(this.sessions) })
+    const snapshot = JSON.stringify({ version: 3, sessions: Object.fromEntries(this.sessions) })
     this.persistQueue = this.persistQueue.then(async () => {
       const target = this.options.sessionStatePath
       const temporary = `${target}.${process.pid}.tmp`
@@ -643,6 +646,7 @@ interface ClaudeCliSessionState {
   reasoningEffort?: string
   systemSignature: string
   toolsSignature: string
+  resumeSessionAt?: string
   lastUsedAt: number
 }
 
@@ -691,7 +695,19 @@ class RequestGate {
 
 function isClaudeQuotaExhaustion(detail: string): boolean {
   return isQuotaExceededError(detail)
-    || /\b(?:hit|reached)\s+(?:your|the)\s+(?:claude\s+)?(?:usage\s+)?limit\b/i.test(detail)
+    || /\b(?:hit|reached)\s+(?:your|the)\s+(?:claude\s+)?(?:(?:usage|session)\s+)?limit\b/i.test(detail)
+}
+
+/** Classify an SDK assistant error before its human-facing text is emitted. */
+export function claudeAssistantFailure(error: string | undefined, detail: string): LlmError | undefined {
+  if (error === undefined) return undefined
+  if (error === 'rate_limit') {
+    return new LlmError(
+      `Claude CLI error: ${detail || error}`,
+      isClaudeQuotaExhaustion(detail) ? QUOTA_EXCEEDED_CODE : 'RATE_LIMIT',
+    )
+  }
+  return new LlmError(`Claude CLI error: ${detail || error}`, EMPTY_RESPONSE_CODE)
 }
 
 /** Map one terminal Claude SDK result without treating transient rate limiting as exhausted quota. */
@@ -719,14 +735,19 @@ function isClaudeCliSessionState(value: unknown): value is ClaudeCliSessionState
     && (state.reasoningEffort === undefined || typeof state.reasoningEffort === 'string')
     && typeof state.systemSignature === 'string'
     && typeof state.toolsSignature === 'string'
+    && (state.resumeSessionAt === undefined || typeof state.resumeSessionAt === 'string')
     && typeof state.lastUsedAt === 'number'
     && Number.isFinite(state.lastUsedAt)
 }
 
-function isPersistedSessionFile(value: unknown): value is { version: 2; sessions: Record<string, unknown> } {
+function isPersistedSessionFile(value: unknown): value is { version: 3; sessions: Record<string, unknown> } {
   if (typeof value !== 'object' || value === null) return false
   const file = value as { version?: unknown; sessions?: unknown }
-  return file.version === 2 && typeof file.sessions === 'object' && file.sessions !== null && !Array.isArray(file.sessions)
+  return file.version === 3 && typeof file.sessions === 'object' && file.sessions !== null && !Array.isArray(file.sessions)
+}
+
+function assistantText(content: readonly { type: string; text?: string }[]): string {
+  return content.filter(block => block.type === 'text').map(block => block.text ?? '').join(' ')
 }
 
 function jsonSchemaToZod(schema: Record<string, unknown>): Record<string, z.ZodTypeAny> {
