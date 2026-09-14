@@ -110,7 +110,7 @@ test('toResponsesInput: system-role messages become instructions unless options.
 
 test('toResponsesTools maps to Responses function tools', () => {
   assert.deepEqual(toResponsesTools([{ name: 'bash', description: 'run', parameters: { type: 'object' } }]), [
-    { type: 'function', name: 'bash', description: 'run', parameters: { type: 'object' } },
+    { type: 'function', name: 'bash', description: 'run', parameters: { type: 'object' }, strict: false },
   ])
 })
 
