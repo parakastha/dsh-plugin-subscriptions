@@ -207,6 +207,31 @@ test('codex gpt-5.6 fallback exposes API reasoning efforts through max', async (
   )
 })
 
+test('codex keeps cache routing stable within a session and isolates other sessions', async () => {
+  const requests: Array<{ route: string | null; cache: unknown }> = []
+  const fetchFn: FetchFn = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    requests.push({ route: new Headers(init?.headers).get('session-id'), cache: body.prompt_cache_key })
+    return new Response(JSON.stringify({ error: { message: 'test request' } }), { status: 400 })
+  }
+  const adapter = codexAdapter({ session: codexSession, discovery: false, fetchFn })
+  for (const sessionId of ['session-one', 'session-one', 'session-two', undefined, undefined]) {
+    await assert.rejects(async () => {
+      for await (const chunk of adapter.stream({ provider: 'codex', model: 'gpt-5.6-terra', messages: [],
+        ...(sessionId === undefined ? {} : { sessionId: sessionId as never }),
+      })) void chunk
+    }, /test request/)
+  }
+  assert.deepEqual(requests.slice(0, 3), [
+    { route: 'session-one', cache: 'session-one' },
+    { route: 'session-one', cache: 'session-one' },
+    { route: 'session-two', cache: 'session-two' },
+  ])
+  assert.equal(requests[3].cache, undefined)
+  assert.ok(requests[3].route)
+  assert.notEqual(requests[3].route, requests[4].route)
+})
+
 test('codex rejects Ultra before sending a model request', async () => {
   const { fetchFn, calls } = fakeFetch({})
   const adapter = codexAdapter({ session: codexSession, discovery: false, fetchFn })

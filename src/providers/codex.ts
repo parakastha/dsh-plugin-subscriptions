@@ -592,7 +592,8 @@ export class CodexAdapter extends LlmAdapter {
         'authorization': `Bearer ${session.accessToken}`,
         'chatgpt-account-id': session.accountId,
         'originator': 'codex_cli_rs',
-        'session-id': randomUUID(),
+        // Keep routing affinity aligned with the prompt cache across steps.
+        'session-id': options.sessionId === undefined ? randomUUID() : String(options.sessionId),
         'accept': 'text/event-stream',
         'content-type': 'application/json',
         ...attributionHeaders(),
