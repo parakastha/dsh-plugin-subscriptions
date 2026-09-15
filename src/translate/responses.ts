@@ -128,6 +128,9 @@ export function toResponsesTools(tools: readonly ToolSchema[]): Record<string, u
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
+    // Responses otherwise normalizes optional properties into required fields.
+    // The harness validates the original schema at execution time.
+    strict: false,
   }))
 }
 
